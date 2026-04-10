@@ -1,0 +1,5 @@
+{
+  "name": "Industrial Production Monitor",
+  "description": "Sistema de monitoreo de producción por turnos con captura operativa y dashboard analítico.",
+  "requestFramePermissions": []
+}

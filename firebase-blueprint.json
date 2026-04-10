@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "ProductionRecord": {
+      "title": "Production Record",
+      "description": "Hourly production data for a specific shift and line.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date", "description": "Date of production" },
+        "shift": { "type": "number", "enum": [1, 2, 3], "description": "Shift number" },
+        "hour": { "type": "string", "description": "Hour range (e.g., 06:30 - 07:30)" },
+        "line": { "type": "string", "description": "Production line ID" },
+        "supervisor": { "type": "string", "description": "Supervisor name" },
+        "sku": { "type": "string", "description": "Product SKU" },
+        "status": { "type": "string", "description": "Operational status" },
+        "plan": { "type": "number", "description": "Calculated production plan in tons" },
+        "real": { "type": "number", "description": "Actual production in tons" },
+        "compliance": { "type": "number", "description": "Compliance percentage" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["date", "shift", "hour", "line", "supervisor", "sku", "status", "plan", "real", "compliance"]
+    },
+    "Supervisor": {
+      "title": "Supervisor",
+      "description": "Supervisor profile with weekly capture goals.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name" },
+        "weeklyGoal": { "type": "number", "description": "Number of captures required per week" },
+        "active": { "type": "boolean", "description": "Whether the supervisor is currently active" },
+        "line": { "type": "string", "description": "Assigned production line" }
+      },
+      "required": ["name", "weeklyGoal", "active", "line"]
+    },
+    "PlantSettings": {
+      "title": "Plant Settings",
+      "description": "Global configuration for the plant.",
+      "type": "object",
+      "properties": {
+        "lines": { "type": "array", "items": { "type": "string" }, "description": "List of production lines" },
+        "lineConfigs": { "type": "object", "description": "Configuration per line (e.g., base plan)" },
+        "statusFactors": { "type": "object", "description": "Mapping of status names to their production factors" },
+        "maxProduction": { "type": "number", "description": "Maximum production limit per hour" }
+      },
+      "required": ["lines", "lineConfigs", "statusFactors", "maxProduction"]
+    }
+  },
+  "firestore": {
+    "/production/{recordId}": {
+      "schema": "ProductionRecord",
+      "description": "Collection of hourly production records."
+    },
+    "/supervisors/{supervisorId}": {
+      "schema": "Supervisor",
+      "description": "Collection of supervisors."
+    },
+    "/settings/{settingId}": {
+      "schema": "PlantSettings",
+      "description": "Global settings for the plant."
+    }
+  }
+}

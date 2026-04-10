@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: production
+    // Document ID: auto-generated
+    // Fields:
+    //   - date: string (YYYY-MM-DD)
+    //   - shift: number (1, 2, 3)
+    //   - hour: string (HH:mm - HH:mm)
+    //   - line: string
+    //   - supervisor: string
+    //   - sku: string
+    //   - status: string (Arranque, Proceso, Sin proceso, Lavado, Fin/cambio)
+    //   - plan: number
+    //   - real: number
+    //   - compliance: number
+    //   - timestamp: timestamp
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "fecarrillo@ayvi.com.mx" && request.auth.token.email_verified == true);
+    }
+
+    function isValidProductionRecord(data) {
+      return data.keys().hasAll(['date', 'shift', 'hour', 'line', 'supervisor', 'sku', 'status', 'plan', 'real', 'compliance']) &&
+             data.date is string &&
+             data.shift in [1, 2, 3] &&
+             data.status is string &&
+             data.plan is number &&
+             data.real is number &&
+             data.compliance is number;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['lines', 'lineConfigs', 'statusFactors', 'maxProduction']) &&
+             data.lines is list &&
+             data.lineConfigs is map &&
+             data.statusFactors is map &&
+             data.maxProduction is number;
+    }
+
+    match /production/{recordId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidProductionRecord(request.resource.data);
+      allow update: if isAdmin() && isValidProductionRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /supervisors/{supervisorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidSettings(request.resource.data);
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth.uid == userId;
+    }
+  }
+}
