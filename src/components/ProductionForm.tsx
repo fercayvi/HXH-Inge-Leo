@@ -52,8 +52,12 @@ export default function ProductionForm() {
       const existingRecords: Record<string, { id?: string; status: OperationalStatus; real: string }> = {};
       
       // Initialize with default values first
-      currentShift.hours.forEach(hour => {
-        existingRecords[hour] = { status: 'Proceso', real: '' };
+      currentShift.hours.forEach((hour, index) => {
+        let defaultStatus: OperationalStatus = 'Proceso';
+        if (index === 0) defaultStatus = 'Arranque';
+        else if (index === currentShift.hours.length - 1) defaultStatus = 'Fin/cambio';
+        
+        existingRecords[hour] = { status: defaultStatus, real: '' };
       });
 
       // Overlay existing data

@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { useSettings } from '../lib/settings';
-import { ProductionRecord, Supervisor } from '../types';
+import { ProductionRecord, Supervisor, OperationalStatus } from '../types';
 import { SHIFTS } from '../constants';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -17,12 +15,12 @@ import {
   TrendingUp, Users, Target, Calendar as CalendarIcon, 
   RefreshCw, BarChart3, Download, Filter, 
   ArrowUpRight, ArrowDownRight, Activity,
-  Trash2, Edit3, Check, X, Eye
+  Trash2, Edit3, Check, X, Eye, Share2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
-import { deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { auth } from '../lib/firebase';
+import { deleteDoc, doc, updateDoc, collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -32,6 +30,57 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export default function Dashboard() {
   const { settings, loading: settingsLoading } = useSettings();
@@ -161,16 +210,61 @@ export default function Dashboard() {
         const shift = SHIFTS.find(s => s.number.toString() === selectedShift);
         hoursToShow = shift ? [...shift.hours] : [];
       } else {
-        // All hours that have data in the filtered set
-        hoursToShow = (Array.from(new Set(filteredRecords.map(r => r.hour))) as string[]).sort();
+        // All hours from all shifts
+        hoursToShow = SHIFTS.flatMap(s => s.hours);
       }
 
       return hoursToShow.map(h => {
         const hourRecords = filteredRecords.filter(r => r.hour === h);
+        
+        // Calculate plan even if no records exist
+        let calculatedPlan = 0;
+        let calculatedReal = 0;
+
+        const isAllLines = selectedLines.includes('all');
+
+        if (hourRecords.length > 0) {
+          // If "All" lines is selected, we sum the values (matching KPIs)
+          // If a specific line is selected, we show its value
+          calculatedReal = hourRecords.reduce((acc, r) => acc + r.real, 0);
+          calculatedPlan = hourRecords.reduce((acc, r) => acc + r.plan, 0);
+        } else {
+          // If no records exist for this hour, we calculate the expected plan
+          if (!isAllLines) {
+            // Specific line selected
+            const lineToUse = selectedLines[0];
+            const basePlan = settings.lineConfigs[lineToUse]?.basePlan || 4.1;
+            
+            const shift = SHIFTS.find(s => s.hours.includes(h));
+            let status: OperationalStatus = 'Proceso';
+            if (shift) {
+              if (h === shift.hours[0]) status = 'Arranque';
+              else if (h === shift.hours[shift.hours.length - 1]) status = 'Fin/cambio';
+            }
+            
+            const factor = settings.statusFactors[status] ?? 1.0;
+            calculatedPlan = parseFloat((basePlan * factor).toFixed(2));
+          } else {
+            // "All" lines selected: sum the base plans of all lines
+            settings.lines.forEach(line => {
+              const basePlan = settings.lineConfigs[line]?.basePlan || 4.1;
+              const shift = SHIFTS.find(s => s.hours.includes(h));
+              let status: OperationalStatus = 'Proceso';
+              if (shift) {
+                if (h === shift.hours[0]) status = 'Arranque';
+                else if (h === shift.hours[shift.hours.length - 1]) status = 'Fin/cambio';
+              }
+              const factor = settings.statusFactors[status] ?? 1.0;
+              calculatedPlan += parseFloat((basePlan * factor).toFixed(2));
+            });
+          }
+          calculatedReal = 0;
+        }
+
         return {
           name: h.split(' - ')[0],
-          real: hourRecords.reduce((acc, r) => acc + r.real, 0),
-          plan: hourRecords.reduce((acc, r) => acc + r.plan, 0)
+          real: calculatedReal,
+          plan: calculatedPlan
         };
       });
     } else {
@@ -212,6 +306,121 @@ export default function Dashboard() {
     });
   }, [filteredRecords, settings.lines]);
 
+  const yAxisMax = useMemo(() => {
+    const maxVal = Math.max(...trendData.map(d => d.real), ...trendData.map(d => d.plan), 0);
+    return Math.ceil(maxVal) + 1;
+  }, [trendData]);
+
+  const [isSharing, setIsSharing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleShare = async () => {
+    setIsDownloading(true);
+    const toastId = toast.loading('Generando imagen del reporte...');
+
+    try {
+      const labels = trendData.map(d => d.name);
+      const realData = trendData.map(d => d.real);
+      const planData = trendData.map(d => d.plan);
+      const barColors = trendData.map(d => {
+        const compliance = d.plan > 0 ? (d.real / d.plan) * 100 : 0;
+        if (compliance < 80) return '#ef4444'; // Rojo
+        if (compliance < 95) return '#f59e0b'; // Amarillo
+        return '#10b981'; // Verde
+      });
+
+      const maxVal = Math.ceil(Math.max(...realData, ...planData, 0)) + 1;
+
+      const chartConfig = {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              type: 'line',
+              label: 'Plan',
+              borderColor: '#3b82f6',
+              borderWidth: 3,
+              fill: false,
+              data: planData,
+              yAxisID: 'y',
+            },
+            {
+              type: 'bar',
+              label: 'Producción Real',
+              backgroundColor: barColors,
+              data: realData,
+              yAxisID: 'y',
+            }
+          ]
+        },
+        options: {
+          title: {
+            display: true,
+            text: `Tendencia de Producción - ${dateFrom} - ${selectedLines[0] === 'all' ? 'Todas' : selectedLines[0]} - ${selectedShift === 'all' ? 'Todos' : `T${selectedShift}`}`,
+            fontSize: 18,
+            fontColor: '#1e293b'
+          },
+          legend: {
+            position: 'bottom'
+          },
+          scales: {
+            yAxes: [{
+              id: 'y',
+              ticks: {
+                beginAtZero: true,
+                max: maxVal
+              }
+            }]
+          }
+        }
+      };
+
+      const quickChartUrl = `https://quickchart.io/chart?width=800&height=400&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+      
+      const response = await fetch(quickChartUrl);
+      if (!response.ok) throw new Error('Error al conectar con el servidor de gráficas');
+      
+      const blob = await response.blob();
+      const fileName = `reporte-produccion-${dateFrom}-${selectedLines[0]}-${selectedShift}.png`.replace(/\s+/g, '_');
+
+      if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        try {
+          const file = new File([blob], fileName, { type: 'image/png' });
+          await navigator.share({
+            files: [file],
+            title: 'Reporte de Producción Ayvi',
+            text: `Reporte de producción para ${dateFrom}`
+          });
+          toast.success('Reporte compartido con éxito', { id: toastId });
+        } catch (err) {
+          if ((err as Error).name !== 'AbortError') {
+            downloadBlob(blob, fileName, toastId);
+          } else {
+            toast.dismiss(toastId);
+          }
+        }
+      } else {
+        downloadBlob(blob, fileName, toastId);
+      }
+    } catch (error) {
+      console.error('Error generating chart:', error);
+      toast.error('Error al generar la gráfica', { id: toastId });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const downloadBlob = (blob: Blob, fileName: string, toastId: string | number) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = fileName;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success('Reporte descargado correctamente', { id: toastId });
+  };
+
   const exportToCSV = () => {
     const headers = ['Fecha', 'Turno', 'Hora', 'Línea', 'Supervisor', 'SKU', 'Estatus', 'Plan', 'Real', '% Cumplimiento'];
     const rows = filteredRecords.map(r => [
@@ -250,22 +459,22 @@ export default function Dashboard() {
 
   const confirmDelete = async () => {
     if (!recordToDelete) return;
+    const path = 'production';
     try {
       // Check if it's a single record ID or a list of IDs (for group delete)
       if (recordToDelete.includes(',')) {
         const ids = recordToDelete.split(',');
-        const promises = ids.map(id => deleteDoc(doc(db, 'production', id)));
+        const promises = ids.map(id => deleteDoc(doc(db, path, id)));
         await Promise.all(promises);
       } else {
-        await deleteDoc(doc(db, 'production', recordToDelete));
+        await deleteDoc(doc(db, path, recordToDelete));
       }
       toast.success('Registro(s) eliminado(s) correctamente');
       setIsDeleteConfirmOpen(false);
       setRecordToDelete(null);
       if (isDetailOpen) setIsDetailOpen(false);
     } catch (error) {
-      console.error("Error deleting record:", error);
-      toast.error('Error al eliminar');
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
 
@@ -283,19 +492,19 @@ export default function Dashboard() {
       toast.error('Valor no válido');
       return;
     }
+    const path = 'production';
     try {
       const record = records.find(r => r.id === id);
       if (!record) return;
       
-      await updateDoc(doc(db, 'production', id), {
+      await updateDoc(doc(db, path, id), {
         real: val,
         compliance: (val / record.plan) * 100
       });
       setEditingId(null);
       toast.success('Registro actualizado');
     } catch (error) {
-      console.error("Error updating record:", error);
-      toast.error('Error al actualizar');
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -368,16 +577,28 @@ export default function Dashboard() {
               </Select>
             </div>
 
-            <Button variant="outline" className="h-10 rounded-xl border-slate-200 text-slate-500" onClick={() => {
-              setDateFrom(new Date().toISOString().split('T')[0]);
-              setDateTo(new Date().toISOString().split('T')[0]);
-              setSelectedLines(['all']);
-              setSelectedShift('all');
-              setSelectedSupervisor('all');
-            }}>
-              <Filter className="h-4 w-4 mr-2" />
-              Limpiar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-10 rounded-xl border-slate-200 text-slate-500" onClick={() => {
+                setDateFrom(new Date().toISOString().split('T')[0]);
+                setDateTo(new Date().toISOString().split('T')[0]);
+                setSelectedLines(['all']);
+                setSelectedShift('all');
+                setSelectedSupervisor('all');
+              }}>
+                <Filter className="h-4 w-4 mr-2" />
+                Limpiar
+              </Button>
+
+              <Button 
+                variant="outline" 
+                className="h-10 rounded-xl border-indigo-200 text-indigo-600 hover:bg-indigo-50" 
+                onClick={handleShare}
+                disabled={isDownloading}
+              >
+                {isDownloading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Share2 className="h-4 w-4 mr-2" />}
+                Compartir Gráfica
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -450,18 +671,25 @@ export default function Dashboard() {
               <ComposedChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} domain={[0, 5]} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} domain={[0, yAxisMax]} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
                 <Bar dataKey="real" name="Producción Real" radius={[4, 4, 0, 0]}>
-                  {trendData.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={entry.real >= entry.plan ? '#10b981' : '#ef4444'} 
-                    />
-                  ))}
+                  {trendData.map((entry, index) => {
+                    const compliance = entry.plan > 0 ? (entry.real / entry.plan) * 100 : 0;
+                    let fillColor = '#10b981'; // Verde (>95%)
+                    if (compliance < 80) fillColor = '#ef4444'; // Rojo
+                    else if (compliance < 95) fillColor = '#f59e0b'; // Amarillo
+                    
+                    return (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={fillColor} 
+                      />
+                    );
+                  })}
                 </Bar>
                 <Line type="monotone" dataKey="plan" name="Plan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
               </ComposedChart>
@@ -469,7 +697,6 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
-
       {/* Comparison Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="border-none shadow-md bg-white p-6">
