@@ -135,6 +135,11 @@ export default function Dashboard() {
     return groupedRecords.find(g => g.id === selectedGroup.id) || null;
   }, [groupedRecords, selectedGroup]);
   
+  const formatNumber = (val: any) => {
+    if (typeof val !== 'number') return val;
+    return parseFloat(Number(val).toFixed(2));
+  };
+
   const isAdmin = auth.currentUser?.email === 'fecarrillo@ayvi.com.mx';
   const kpis = useMemo(() => {
     const totalReal = filteredRecords.reduce((acc, r) => acc + r.real, 0);
@@ -172,11 +177,16 @@ export default function Dashboard() {
         
         let calculatedPlan = 0;
         let calculatedReal = 0;
+        let calculatedFeed = 0;
+        let calculatedInjection = 0;
         const lineBreakdown: Record<string, number> = {};
 
         if (hourRecords.length > 0) {
           calculatedReal = hourRecords.reduce((acc, r) => acc + r.real, 0);
           calculatedPlan = hourRecords.reduce((acc, r) => acc + r.plan, 0);
+          calculatedFeed = hourRecords.reduce((acc, r) => acc + (r.feed || 0), 0);
+          // For injection, we take the sum of values as per business rule (no averaging/division)
+          calculatedInjection = hourRecords.reduce((acc, r) => acc + (r.injection || 0), 0);
           
           if (isAllLines) {
             settings.lines.forEach(l => {
@@ -214,12 +224,16 @@ export default function Dashboard() {
             });
           }
           calculatedReal = 0;
+          calculatedFeed = 0;
+          calculatedInjection = 0;
         }
 
         return {
           name: h.split(' - ')[0],
           real: calculatedReal,
           plan: calculatedPlan,
+          feed: calculatedFeed,
+          injection: calculatedInjection,
           ...lineBreakdown
         };
       });
@@ -238,6 +252,8 @@ export default function Dashboard() {
           name: format(parseISO(d as string), 'dd/MM'),
           real: dateRecords.reduce((acc, r) => acc + r.real, 0),
           plan: dateRecords.reduce((acc, r) => acc + r.plan, 0),
+          feed: dateRecords.reduce((acc, r) => acc + (r.feed || 0), 0),
+          injection: dateRecords.reduce((acc, r) => acc + (r.injection || 0), 0),
           ...lineBreakdown
         };
       });
@@ -270,7 +286,12 @@ export default function Dashboard() {
   }, [filteredRecords, settings.lines]);
 
   const yAxisMax = useMemo(() => {
-    const maxVal = Math.max(...trendData.map(d => d.real), ...trendData.map(d => d.plan), 0);
+    const maxVal = Math.max(
+      ...trendData.map(d => d.real), 
+      ...trendData.map(d => d.plan), 
+      ...trendData.map(d => d.feed || 0),
+      0
+    );
     return Math.ceil(maxVal) + 1;
   }, [trendData]);
 
@@ -285,6 +306,8 @@ export default function Dashboard() {
       const labels = trendData.map(d => d.name);
       const realData = trendData.map(d => d.real);
       const planData = trendData.map(d => d.plan);
+      const feedData = trendData.map(d => d.feed || 0);
+      const injectionData = trendData.map(d => d.injection || 0);
       const isAllLines = selectedLines.includes('all');
 
       const datasets: any[] = [
@@ -296,6 +319,25 @@ export default function Dashboard() {
           fill: false,
           data: planData,
           yAxisID: 'y',
+        },
+        {
+          type: 'line',
+          label: 'Alimentación',
+          borderColor: '#94a3b8',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          fill: false,
+          data: feedData,
+          yAxisID: 'y',
+        },
+        {
+          type: 'line',
+          label: '% Inyección',
+          borderColor: '#06b6d4',
+          borderWidth: 2,
+          fill: false,
+          data: injectionData,
+          yAxisID: 'y2',
         }
       ];
 
@@ -339,7 +381,7 @@ export default function Dashboard() {
         });
       }
 
-      const maxVal = Math.ceil(Math.max(...realData, ...planData, 0)) + 1;
+      const maxVal = Math.ceil(Math.max(...realData, ...planData, ...feedData, 0)) + 1;
 
       const chartConfig = {
         type: 'bar',
@@ -364,14 +406,35 @@ export default function Dashboard() {
             position: 'bottom'
           },
           scales: {
-            yAxes: [{
-              id: 'y',
-              stacked: isAllLines,
-              ticks: {
-                beginAtZero: true,
-                max: maxVal
+            yAxes: [
+              {
+                id: 'y',
+                stacked: isAllLines,
+                ticks: {
+                  beginAtZero: true,
+                  max: maxVal
+                },
+                scaleLabel: {
+                  display: true,
+                  labelString: 'Toneladas'
+                }
+              },
+              {
+                id: 'y2',
+                position: 'right',
+                ticks: {
+                  beginAtZero: true,
+                  max: 100
+                },
+                gridLines: {
+                  drawOnChartArea: false
+                },
+                scaleLabel: {
+                  display: true,
+                  labelString: 'Porcentaje (%)'
+                }
               }
-            }],
+            ],
             xAxes: [{
               stacked: isAllLines
             }]
@@ -674,9 +737,30 @@ export default function Dashboard() {
               <ComposedChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} domain={[0, yAxisMax]} />
+                <YAxis 
+                  yAxisId="tons"
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{fill: '#64748b', fontSize: 12}} 
+                  domain={[0, yAxisMax]} 
+                  tickFormatter={formatNumber}
+                />
+                <YAxis 
+                  yAxisId="percentage"
+                  orientation="right"
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{fill: '#64748b', fontSize: 12}} 
+                  domain={[0, 100]} 
+                  unit="%"
+                />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value: any, name: string) => {
+                    const formattedValue = formatNumber(value);
+                    if (name.includes('%') || name.includes('Inyección')) return [`${formattedValue}%`, name];
+                    return [`${formattedValue} Ton`, name];
+                  }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
                 {selectedLines.includes('all') ? (
@@ -686,6 +770,7 @@ export default function Dashboard() {
                       dataKey={line} 
                       name={line} 
                       stackId="a" 
+                      yAxisId="tons"
                       fill={LINE_COLORS[idx % LINE_COLORS.length]}
                     >
                       <LabelList 
@@ -693,12 +778,12 @@ export default function Dashboard() {
                         position="inside" 
                         fill="#fff" 
                         fontSize={10} 
-                        formatter={(val: number) => val > 0 ? val.toFixed(1) : ''} 
+                        formatter={(val: number) => val > 0 ? formatNumber(val) : ''} 
                       />
                     </Bar>
                   ))
                 ) : (
-                  <Bar dataKey="real" name="Producción Real" radius={[4, 4, 0, 0]}>
+                  <Bar dataKey="real" name="Producción Real" yAxisId="tons" radius={[4, 4, 0, 0]}>
                     {trendData.map((entry, index) => {
                       const compliance = entry.plan > 0 ? (entry.real / entry.plan) * 100 : 0;
                       let fillColor = '#10b981'; // Verde (>95%)
@@ -717,11 +802,13 @@ export default function Dashboard() {
                       position="top" 
                       fill="#64748b" 
                       fontSize={10} 
-                      formatter={(val: number) => val > 0 ? val.toFixed(1) : ''} 
+                      formatter={(val: number) => val > 0 ? formatNumber(val) : ''} 
                     />
                   </Bar>
                 )}
-                <Line type="monotone" dataKey="plan" name="Plan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
+                <Line yAxisId="tons" type="monotone" dataKey="plan" name="Plan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
+                <Line yAxisId="tons" type="monotone" dataKey="feed" name="Alimentación" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                <Line yAxisId="percentage" type="monotone" dataKey="injection" name="% Inyección" stroke="#06b6d4" strokeWidth={2} dot={{ r: 4, fill: '#06b6d4' }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>

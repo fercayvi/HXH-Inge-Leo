@@ -12,6 +12,8 @@ export interface ProductionRecord {
   plan: number;
   real: number;
   compliance: number;
+  feed?: number;
+  injection?: number;
   timestamp?: any;
 }
 

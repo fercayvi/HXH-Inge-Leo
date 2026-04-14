@@ -33,7 +33,7 @@ export default function ProductionForm() {
   }, [settings, line]);
 
   // Hourly data state
-  const [hourlyData, setHourlyData] = useState<Record<string, { id?: string; status: OperationalStatus; real: string }>>({});
+  const [hourlyData, setHourlyData] = useState<Record<string, { id?: string; status: OperationalStatus; real: string; feed: string; injection: string }>>({});
   const [savingHours, setSavingHours] = useState<Record<string, boolean>>({});
 
   const currentShift = SHIFTS.find(s => s.number === shiftNumber)!;
@@ -50,7 +50,7 @@ export default function ProductionForm() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const existingRecords: Record<string, { id?: string; status: OperationalStatus; real: string }> = {};
+      const existingRecords: Record<string, { id?: string; status: OperationalStatus; real: string; feed: string; injection: string }> = {};
       
       // Initialize with default values first
       currentShift.hours.forEach((hour, index) => {
@@ -58,7 +58,7 @@ export default function ProductionForm() {
         if (index === 0) defaultStatus = 'Arranque';
         else if (index === currentShift.hours.length - 1) defaultStatus = 'Fin/cambio';
         
-        existingRecords[hour] = { status: defaultStatus, real: '' };
+        existingRecords[hour] = { status: defaultStatus, real: '', feed: '', injection: '' };
       });
 
       // Overlay existing data
@@ -67,7 +67,9 @@ export default function ProductionForm() {
         existingRecords[data.hour] = {
           id: doc.id,
           status: data.status,
-          real: data.real.toString()
+          real: data.real.toString(),
+          feed: data.feed?.toString() || '',
+          injection: data.injection?.toString() || ''
         };
       });
 
@@ -102,6 +104,8 @@ export default function ProductionForm() {
     try {
       const data = hourlyData[hour];
       const realNum = parseFloat(data.real) || 0;
+      const feedNum = parseFloat(data.feed) || 0;
+      const injectionNum = parseFloat(data.injection) || 0;
       const plan = calculatePlan(data.status);
       const compliance = calculateCompliance(realNum, plan);
 
@@ -115,6 +119,8 @@ export default function ProductionForm() {
         status: data.status,
         plan,
         real: realNum,
+        feed: feedNum,
+        injection: injectionNum,
         compliance,
         timestamp: serverTimestamp()
       };
@@ -148,6 +154,20 @@ export default function ProductionForm() {
     }));
   };
 
+  const handleFeedChange = (hour: string, value: string) => {
+    setHourlyData(prev => ({
+      ...prev,
+      [hour]: { ...prev[hour], feed: value }
+    }));
+  };
+
+  const handleInjectionChange = (hour: string, value: string) => {
+    setHourlyData(prev => ({
+      ...prev,
+      [hour]: { ...prev[hour], injection: value }
+    }));
+  };
+
   const calculatePlan = (status: OperationalStatus) => {
     const basePlan = settings.lineConfigs[line]?.basePlan || 4.1;
     const factor = settings.statusFactors[status] ?? 1.0;
@@ -172,6 +192,8 @@ export default function ProductionForm() {
         .map(hour => {
           const data = hourlyData[hour];
           const realNum = parseFloat(data.real) || 0;
+          const feedNum = parseFloat(data.feed) || 0;
+          const injectionNum = parseFloat(data.injection) || 0;
           const plan = calculatePlan(data.status);
           const compliance = calculateCompliance(realNum, plan);
 
@@ -188,6 +210,8 @@ export default function ProductionForm() {
               status: data.status,
               plan,
               real: realNum,
+              feed: feedNum,
+              injection: injectionNum,
               compliance,
               timestamp: serverTimestamp()
             }
@@ -303,21 +327,24 @@ export default function ProductionForm() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
+          {/* Desktop Table View */}
+          <div className="hidden md:block rounded-xl border border-slate-200 overflow-hidden bg-white">
             <Table>
               <TableHeader className="bg-slate-50">
                 <TableRow>
-                  <TableHead className="w-[180px]">Hora</TableHead>
-                  <TableHead className="w-[200px]">Estatus</TableHead>
-                  <TableHead>Producción Real (Ton)</TableHead>
-                  <TableHead>Plan (Ton)</TableHead>
-                  <TableHead className="text-right">% Cumplimiento</TableHead>
+                  <TableHead className="w-[140px]">Hora</TableHead>
+                  <TableHead className="w-[160px]">Estatus</TableHead>
+                  <TableHead className="w-[120px]">Aliment. (Ton)</TableHead>
+                  <TableHead className="w-[100px]">% Inyec.</TableHead>
+                  <TableHead className="w-[120px]">Real (Ton)</TableHead>
+                  <TableHead className="w-[100px]">Plan (Ton)</TableHead>
+                  <TableHead className="text-right w-[120px]">% Cumpl.</TableHead>
                   <th className="w-[50px]"></th>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {currentShift.hours.map((hour) => {
-                  const data = hourlyData[hour] || { status: 'Proceso', real: '' };
+                  const data = hourlyData[hour] || { status: 'Proceso', real: '', feed: '', injection: '' };
                   const realNum = parseFloat(data.real) || 0;
                   const plan = calculatePlan(data.status);
                   const compliance = calculateCompliance(realNum, plan);
@@ -347,16 +374,36 @@ export default function ProductionForm() {
                         <Input 
                           type="number" 
                           step="0.1"
+                          className="h-9 border-slate-200"
+                          value={data.feed} 
+                          onChange={(e) => handleFeedChange(hour, e.target.value)}
+                          placeholder="0.0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input 
+                          type="number" 
+                          step="0.1"
+                          className="h-9 border-slate-200"
+                          value={data.injection} 
+                          onChange={(e) => handleInjectionChange(hour, e.target.value)}
+                          placeholder="0"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input 
+                          type="number" 
+                          step="0.1"
                           min="0"
                           max={settings.maxProduction}
-                          className="h-9 border-slate-200"
+                          className="h-9 border-slate-200 font-bold text-indigo-600"
                           value={data.real} 
                           onChange={(e) => handleRealChange(hour, e.target.value)}
                           onFocus={(e) => e.target.select()}
                           placeholder="0.0"
                         />
                       </TableCell>
-                      <TableCell className="text-slate-500 font-mono">{plan.toFixed(2)}</TableCell>
+                      <TableCell className="text-slate-500 font-mono text-xs">{plan.toFixed(2)}</TableCell>
                       <TableCell className="text-right">
                         <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-semibold`}>
                           {compliance}%
@@ -378,6 +425,103 @@ export default function ProductionForm() {
                 })}
               </TableBody>
             </Table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {currentShift.hours.map((hour) => {
+              const data = hourlyData[hour] || { status: 'Proceso', real: '', feed: '', injection: '' };
+              const realNum = parseFloat(data.real) || 0;
+              const plan = calculatePlan(data.status);
+              const compliance = calculateCompliance(realNum, plan);
+              const isSaving = savingHours[hour];
+
+              return (
+                <div key={hour} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+                    <div className="flex items-center gap-2 font-bold text-slate-700">
+                      <Clock className="h-4 w-4 text-indigo-500" />
+                      {hour}
+                    </div>
+                    <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-bold`}>
+                      {compliance}%
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Estatus</Label>
+                      <Select value={data.status} onValueChange={(v) => handleStatusChange(hour, v as OperationalStatus)}>
+                        <SelectTrigger className="h-10 border-slate-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.keys(settings.statusFactors).map(s => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Plan (Ton)</Label>
+                      <div className="h-10 flex items-center px-3 bg-slate-50 rounded-md border border-slate-100 text-slate-500 font-mono font-bold">
+                        {plan.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Aliment.</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1"
+                        className="h-10 border-slate-200"
+                        value={data.feed} 
+                        onChange={(e) => handleFeedChange(hour, e.target.value)}
+                        placeholder="0.0"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">% Inyec.</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1"
+                        className="h-10 border-slate-200"
+                        value={data.injection} 
+                        onChange={(e) => handleInjectionChange(hour, e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold text-indigo-600">Real (Ton)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1"
+                        className="h-10 border-indigo-200 focus:border-indigo-500 font-bold text-indigo-600"
+                        value={data.real} 
+                        onChange={(e) => handleRealChange(hour, e.target.value)}
+                        placeholder="0.0"
+                      />
+                    </div>
+                  </div>
+
+                  <Button 
+                    className={`w-full h-11 ${data.id ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                    variant={data.id ? 'secondary' : 'default'}
+                    onClick={() => saveHour(hour)}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    {data.id ? 'Actualizar Hora' : 'Guardar Hora'}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex justify-end pt-4">
