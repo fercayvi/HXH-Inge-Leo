@@ -424,7 +424,7 @@ export default function Dashboard() {
                 position: 'right',
                 ticks: {
                   beginAtZero: true,
-                  max: 100
+                  max: 50
                 },
                 gridLines: {
                   drawOnChartArea: false
@@ -751,7 +751,7 @@ export default function Dashboard() {
                   axisLine={false} 
                   tickLine={false} 
                   tick={{fill: '#64748b', fontSize: 12}} 
-                  domain={[0, 100]} 
+                  domain={[0, 50]} 
                   unit="%"
                 />
                 <Tooltip 
