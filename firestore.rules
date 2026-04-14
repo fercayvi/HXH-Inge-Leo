@@ -73,5 +73,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth.uid == userId;
     }
+
+    // Allow unauthenticated read for connection test
+    match /_connection_test_/{docId} {
+      allow read: if true;
+    }
   }
 }

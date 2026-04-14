@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, serverTimestamp, query, where, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { handleFirestoreError, OperationType } from '../lib/error-handler';
 import { useSettings } from '../lib/settings';
 import { SHIFTS, SKUS } from '../constants';
 import { OperationalStatus, ProductionRecord, Supervisor } from '../types';
@@ -129,8 +130,7 @@ export default function ProductionForm() {
       }
       toast.success(`Hora ${hour} guardada`);
     } catch (error) {
-      console.error('Error saving hour:', error);
-      toast.error('Error al guardar la hora');
+      handleFirestoreError(error, OperationType.WRITE, 'production');
     } finally {
       setSavingHours(prev => ({ ...prev, [hour]: false }));
     }
@@ -210,13 +210,12 @@ export default function ProductionForm() {
       });
       
       await Promise.all(batchPromises);
-
+      
       toast.success('Turno actualizado correctamente', {
         icon: <CheckCircle2 className="h-5 w-5 text-green-500" />
       });
     } catch (error) {
-      console.error('Error saving records:', error);
-      toast.error('Error al guardar el turno');
+      handleFirestoreError(error, OperationType.WRITE, 'production');
     } finally {
       setIsSubmitting(false);
     }

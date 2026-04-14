@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  Line, Cell, AreaChart, Area, ComposedChart
+  Line, Cell, AreaChart, Area, ComposedChart, LabelList
 } from 'recharts';
 import { 
   TrendingUp, Users, Target, Calendar as CalendarIcon, 
@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { deleteDoc, doc, updateDoc, collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { handleFirestoreError, OperationType } from '../lib/error-handler';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -30,57 +31,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export default function Dashboard() {
   const { settings, loading: settingsLoading } = useSettings();
@@ -199,9 +149,12 @@ export default function Dashboard() {
     };
   }, [filteredRecords]);
 
+  const LINE_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6'];
+
   // Dynamic Trend Chart Data
   const trendData = useMemo(() => {
     const isSingleDay = dateFrom === dateTo;
+    const isAllLines = selectedLines.includes('all');
     
     if (isSingleDay) {
       // Determine which hours to show
@@ -217,17 +170,19 @@ export default function Dashboard() {
       return hoursToShow.map(h => {
         const hourRecords = filteredRecords.filter(r => r.hour === h);
         
-        // Calculate plan even if no records exist
         let calculatedPlan = 0;
         let calculatedReal = 0;
-
-        const isAllLines = selectedLines.includes('all');
+        const lineBreakdown: Record<string, number> = {};
 
         if (hourRecords.length > 0) {
-          // If "All" lines is selected, we sum the values (matching KPIs)
-          // If a specific line is selected, we show its value
           calculatedReal = hourRecords.reduce((acc, r) => acc + r.real, 0);
           calculatedPlan = hourRecords.reduce((acc, r) => acc + r.plan, 0);
+          
+          if (isAllLines) {
+            settings.lines.forEach(l => {
+              lineBreakdown[l] = hourRecords.filter(r => r.line === l).reduce((acc, r) => acc + r.real, 0);
+            });
+          }
         } else {
           // If no records exist for this hour, we calculate the expected plan
           if (!isAllLines) {
@@ -264,7 +219,8 @@ export default function Dashboard() {
         return {
           name: h.split(' - ')[0],
           real: calculatedReal,
-          plan: calculatedPlan
+          plan: calculatedPlan,
+          ...lineBreakdown
         };
       });
     } else {
@@ -272,14 +228,21 @@ export default function Dashboard() {
       const dates = Array.from(new Set(filteredRecords.map(r => r.date))).sort();
       return dates.map(d => {
         const dateRecords = filteredRecords.filter(r => r.date === d);
+        const lineBreakdown: Record<string, number> = {};
+        if (isAllLines) {
+          settings.lines.forEach(l => {
+            lineBreakdown[l] = dateRecords.filter(r => r.line === l).reduce((acc, r) => acc + r.real, 0);
+          });
+        }
         return {
           name: format(parseISO(d as string), 'dd/MM'),
           real: dateRecords.reduce((acc, r) => acc + r.real, 0),
-          plan: dateRecords.reduce((acc, r) => acc + r.plan, 0)
+          plan: dateRecords.reduce((acc, r) => acc + r.plan, 0),
+          ...lineBreakdown
         };
       });
     }
-  }, [filteredRecords, dateFrom, dateTo, selectedShift]);
+  }, [filteredRecords, dateFrom, dateTo, selectedShift, selectedLines, settings]);
 
   // Comparison Charts Data
   const shiftComparison = useMemo(() => {
@@ -322,12 +285,59 @@ export default function Dashboard() {
       const labels = trendData.map(d => d.name);
       const realData = trendData.map(d => d.real);
       const planData = trendData.map(d => d.plan);
-      const barColors = trendData.map(d => {
-        const compliance = d.plan > 0 ? (d.real / d.plan) * 100 : 0;
-        if (compliance < 80) return '#ef4444'; // Rojo
-        if (compliance < 95) return '#f59e0b'; // Amarillo
-        return '#10b981'; // Verde
-      });
+      const isAllLines = selectedLines.includes('all');
+
+      const datasets: any[] = [
+        {
+          type: 'line',
+          label: 'Plan',
+          borderColor: '#3b82f6',
+          borderWidth: 3,
+          fill: false,
+          data: planData,
+          yAxisID: 'y',
+        }
+      ];
+
+      if (isAllLines) {
+        settings.lines.forEach((line, idx) => {
+          datasets.push({
+            type: 'bar',
+            label: line,
+            backgroundColor: LINE_COLORS[idx % LINE_COLORS.length],
+            data: trendData.map(d => (d as any)[line] || 0),
+            yAxisID: 'y',
+            stack: 'stack0',
+            datalabels: {
+              display: true,
+              color: '#fff',
+              font: { weight: 'bold', size: 10 },
+              formatter: (val: number) => val > 0 ? val.toFixed(1) : ''
+            }
+          });
+        });
+      } else {
+        const barColors = trendData.map(d => {
+          const compliance = d.plan > 0 ? (d.real / d.plan) * 100 : 0;
+          if (compliance < 80) return '#ef4444'; // Rojo
+          if (compliance < 95) return '#f59e0b'; // Amarillo
+          return '#10b981'; // Verde
+        });
+
+        datasets.push({
+          type: 'bar',
+          label: 'Producción Real',
+          backgroundColor: barColors,
+          data: realData,
+          yAxisID: 'y',
+          datalabels: {
+            display: true,
+            color: '#fff',
+            font: { weight: 'bold', size: 10 },
+            formatter: (val: number) => val > 0 ? val.toFixed(1) : ''
+          }
+        });
+      }
 
       const maxVal = Math.ceil(Math.max(...realData, ...planData, 0)) + 1;
 
@@ -335,26 +345,15 @@ export default function Dashboard() {
         type: 'bar',
         data: {
           labels: labels,
-          datasets: [
-            {
-              type: 'line',
-              label: 'Plan',
-              borderColor: '#3b82f6',
-              borderWidth: 3,
-              fill: false,
-              data: planData,
-              yAxisID: 'y',
-            },
-            {
-              type: 'bar',
-              label: 'Producción Real',
-              backgroundColor: barColors,
-              data: realData,
-              yAxisID: 'y',
-            }
-          ]
+          datasets: datasets
         },
         options: {
+          plugins: {
+            datalabels: {
+              anchor: 'center',
+              align: 'center',
+            }
+          },
           title: {
             display: true,
             text: `Tendencia de Producción - ${dateFrom} - ${selectedLines[0] === 'all' ? 'Todas' : selectedLines[0]} - ${selectedShift === 'all' ? 'Todos' : `T${selectedShift}`}`,
@@ -367,10 +366,14 @@ export default function Dashboard() {
           scales: {
             yAxes: [{
               id: 'y',
+              stacked: isAllLines,
               ticks: {
                 beginAtZero: true,
                 max: maxVal
               }
+            }],
+            xAxes: [{
+              stacked: isAllLines
             }]
           }
         }
@@ -676,21 +679,48 @@ export default function Dashboard() {
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
-                <Bar dataKey="real" name="Producción Real" radius={[4, 4, 0, 0]}>
-                  {trendData.map((entry, index) => {
-                    const compliance = entry.plan > 0 ? (entry.real / entry.plan) * 100 : 0;
-                    let fillColor = '#10b981'; // Verde (>95%)
-                    if (compliance < 80) fillColor = '#ef4444'; // Rojo
-                    else if (compliance < 95) fillColor = '#f59e0b'; // Amarillo
-                    
-                    return (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={fillColor} 
+                {selectedLines.includes('all') ? (
+                  settings.lines.map((line, idx) => (
+                    <Bar 
+                      key={line} 
+                      dataKey={line} 
+                      name={line} 
+                      stackId="a" 
+                      fill={LINE_COLORS[idx % LINE_COLORS.length]}
+                    >
+                      <LabelList 
+                        dataKey={line} 
+                        position="inside" 
+                        fill="#fff" 
+                        fontSize={10} 
+                        formatter={(val: number) => val > 0 ? val.toFixed(1) : ''} 
                       />
-                    );
-                  })}
-                </Bar>
+                    </Bar>
+                  ))
+                ) : (
+                  <Bar dataKey="real" name="Producción Real" radius={[4, 4, 0, 0]}>
+                    {trendData.map((entry, index) => {
+                      const compliance = entry.plan > 0 ? (entry.real / entry.plan) * 100 : 0;
+                      let fillColor = '#10b981'; // Verde (>95%)
+                      if (compliance < 80) fillColor = '#ef4444'; // Rojo
+                      else if (compliance < 95) fillColor = '#f59e0b'; // Amarillo
+                      
+                      return (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={fillColor} 
+                        />
+                      );
+                    })}
+                    <LabelList 
+                      dataKey="real" 
+                      position="top" 
+                      fill="#64748b" 
+                      fontSize={10} 
+                      formatter={(val: number) => val > 0 ? val.toFixed(1) : ''} 
+                    />
+                  </Bar>
+                )}
                 <Line type="monotone" dataKey="plan" name="Plan" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
               </ComposedChart>
             </ResponsiveContainer>
