@@ -3,6 +3,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, signIn, logOut } from './lib/firebase';
 import ProductionForm from '@/src/components/ProductionForm';
 import Dashboard from '@/src/components/Dashboard';
+import Performance from '@/src/components/Performance';
 import SupervisorEditor from '@/src/components/SupervisorEditor';
 import Configuration from '@/src/components/Configuration';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,8 @@ import {
   ShieldCheck,
   Settings,
   Users as UsersIcon,
-  Sliders
+  Sliders,
+  TrendingUp
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -130,6 +132,10 @@ export default function App() {
                 <LayoutDashboard className="h-4 w-4 mr-2" />
                 Dashboard
               </TabsTrigger>
+              <TabsTrigger value="performance" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <TrendingUp className="h-4 w-4 mr-2" />
+                Rendimiento
+              </TabsTrigger>
               {isAdmin && (
                 <TabsTrigger value="supervisors" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                   <UsersIcon className="h-4 w-4 mr-2" />
@@ -156,6 +162,10 @@ export default function App() {
 
           <TabsContent value="dashboard" className="mt-0 focus-visible:outline-none">
             <Dashboard />
+          </TabsContent>
+
+          <TabsContent value="performance" className="mt-0 focus-visible:outline-none">
+            <Performance />
           </TabsContent>
 
           {isAdmin && (
