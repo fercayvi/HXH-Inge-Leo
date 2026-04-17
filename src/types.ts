@@ -34,7 +34,7 @@ export interface Supervisor {
 
 export interface PlantSettings {
   lines: string[];
-  lineConfigs: Record<string, { basePlan: number }>;
+  productConfigs: Record<string, { basePlan: number }>;
   statusFactors: Record<string, number>;
   maxProduction: number;
 }

@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { 
   Loader2, Plus, Trash2, Save, Settings, 
-  Factory, Activity, Target, AlertCircle 
+  Factory, Activity, Target, AlertCircle,
+  Package
 } from 'lucide-react';
 
 export default function Configuration() {
@@ -19,6 +20,8 @@ export default function Configuration() {
   // Local state for editing
   const [localSettings, setLocalSettings] = useState(settings);
   const [newLine, setNewLine] = useState('');
+  const [newSku, setNewSku] = useState('');
+  const [newSkuPlan, setNewSkuPlan] = useState('4.1');
   const [newStatus, setNewStatus] = useState('');
   const [newFactor, setNewFactor] = useState('1.0');
 
@@ -58,23 +61,42 @@ export default function Configuration() {
     const updatedLines = [...localSettings.lines, newLine.trim()];
     setLocalSettings({
       ...localSettings,
-      lines: updatedLines,
-      lineConfigs: {
-        ...localSettings.lineConfigs,
-        [newLine.trim()]: { basePlan: 4.1 }
-      }
+      lines: updatedLines
     });
     setNewLine('');
   };
 
   const removeLine = (line: string) => {
     const updatedLines = localSettings.lines.filter(l => l !== line);
-    const updatedConfigs = { ...localSettings.lineConfigs };
-    delete updatedConfigs[line];
     setLocalSettings({
       ...localSettings,
-      lines: updatedLines,
-      lineConfigs: updatedConfigs
+      lines: updatedLines
+    });
+  };
+
+  const addProduct = () => {
+    if (!newSku.trim()) return;
+    if (localSettings.productConfigs[newSku.trim()] !== undefined) {
+      toast.error('El producto ya existe');
+      return;
+    }
+    setLocalSettings({
+      ...localSettings,
+      productConfigs: {
+        ...localSettings.productConfigs,
+        [newSku.trim()]: { basePlan: parseFloat(newSkuPlan) || 0 }
+      }
+    });
+    setNewSku('');
+    setNewSkuPlan('4.1');
+  };
+
+  const removeProduct = (sku: string) => {
+    const updatedConfigs = { ...localSettings.productConfigs };
+    delete updatedConfigs[sku];
+    setLocalSettings({
+      ...localSettings,
+      productConfigs: updatedConfigs
     });
   };
 
@@ -104,12 +126,12 @@ export default function Configuration() {
     });
   };
 
-  const updateLinePlan = (line: string, plan: string) => {
+  const updateProductPlan = (sku: string, plan: string) => {
     setLocalSettings({
       ...localSettings,
-      lineConfigs: {
-        ...localSettings.lineConfigs,
-        [line]: { basePlan: parseFloat(plan) || 0 }
+      productConfigs: {
+        ...localSettings.productConfigs,
+        [sku]: { basePlan: parseFloat(plan) || 0 }
       }
     });
   };
@@ -150,7 +172,7 @@ export default function Configuration() {
               <Factory className="mr-2 h-5 w-5 text-blue-500" />
               Líneas de Producción
             </CardTitle>
-            <CardDescription>Define las líneas activas y su plan base (Ton/Hr)</CardDescription>
+            <CardDescription>Define las líneas activas en planta</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex gap-2">
@@ -170,7 +192,6 @@ export default function Configuration() {
                 <TableHeader className="bg-slate-50">
                   <TableRow>
                     <TableHead>Línea</TableHead>
-                    <TableHead className="w-[120px]">Plan Base</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -178,15 +199,6 @@ export default function Configuration() {
                   {localSettings.lines.map(line => (
                     <TableRow key={line}>
                       <TableCell className="font-medium">{line}</TableCell>
-                      <TableCell>
-                        <Input 
-                          type="number" 
-                          step="0.1"
-                          value={localSettings.lineConfigs[line]?.basePlan || 0}
-                          onChange={(e) => updateLinePlan(line, e.target.value)}
-                          className="h-8 text-xs font-mono"
-                        />
-                      </TableCell>
                       <TableCell>
                         <Button 
                           variant="ghost" 
@@ -199,6 +211,79 @@ export default function Configuration() {
                       </TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Product SKU Configuration */}
+        <Card className="border-none shadow-md overflow-hidden">
+          <div className="h-1 w-full bg-emerald-500" />
+          <CardHeader>
+            <CardTitle className="text-lg font-bold flex items-center">
+              <Package className="mr-2 h-5 w-5 text-emerald-500" />
+              Productos (SKU)
+            </CardTitle>
+            <CardDescription>Define los productos y su plan base (Ton/Hr)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="flex gap-2">
+              <Input 
+                placeholder="Nombre SKU" 
+                value={newSku} 
+                onChange={(e) => setNewSku(e.target.value)}
+              />
+              <Input 
+                type="number" 
+                step="0.1" 
+                placeholder="Plan" 
+                value={newSkuPlan} 
+                onChange={(e) => setNewSkuPlan(e.target.value)}
+                className="w-24"
+              />
+              <Button onClick={addProduct} variant="secondary">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="rounded-lg border border-slate-100 overflow-hidden">
+              <Table>
+                <TableHeader className="bg-slate-50">
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="w-[120px]">Plan Base</TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Object.entries(localSettings.productConfigs || {}).map(([sku, config]) => {
+                    const productConfig = config as { basePlan: number };
+                    return (
+                      <TableRow key={sku}>
+                        <TableCell className="font-medium">{sku}</TableCell>
+                        <TableCell>
+                          <Input 
+                            type="number" 
+                            step="0.1"
+                            value={productConfig.basePlan}
+                            onChange={(e) => updateProductPlan(sku, e.target.value)}
+                            className="h-8 text-xs font-mono"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => removeProduct(sku)}
+                            className="h-8 w-8 text-slate-400 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

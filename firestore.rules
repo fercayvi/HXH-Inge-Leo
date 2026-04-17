@@ -46,9 +46,9 @@ service cloud.firestore {
     }
 
     function isValidSettings(data) {
-      return data.keys().hasAll(['lines', 'lineConfigs', 'statusFactors', 'maxProduction']) &&
+      return data.keys().hasAll(['lines', 'productConfigs', 'statusFactors', 'maxProduction']) &&
              data.lines is list &&
-             data.lineConfigs is map &&
+             data.productConfigs is map &&
              data.statusFactors is map &&
              data.maxProduction is number;
     }

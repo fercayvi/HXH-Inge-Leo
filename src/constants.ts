@@ -60,4 +60,9 @@ export const SHIFTS: ShiftConfig[] = [
 ];
 
 export const LINES = ['Línea 1', 'Línea 2', 'Línea 3'];
-export const SKUS = ['SKU-001', 'SKU-002', 'SKU-003', 'SKU-004'];
+export const DEFAULT_PRODUCTS: Record<string, { basePlan: number }> = {
+  'Pechuga': { basePlan: 4.1 },
+  'Alita': { basePlan: 1.7 },
+  'Fajita': { basePlan: 2.2 },
+};
+export const SKUS = Object.keys(DEFAULT_PRODUCTS);

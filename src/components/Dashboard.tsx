@@ -195,11 +195,13 @@ export default function Dashboard() {
           }
         } else {
           // If no records exist for this hour, we calculate the expected plan
+          const configs = settings.productConfigs || {};
+          const productKeys = Object.keys(configs);
+          const firstSku = productKeys[0] || '';
+          const basePlanVal = configs[firstSku]?.basePlan || 4.1;
+
           if (!isAllLines) {
             // Specific line selected
-            const lineToUse = selectedLines[0];
-            const basePlan = settings.lineConfigs[lineToUse]?.basePlan || 4.1;
-            
             const shift = SHIFTS.find(s => s.hours.includes(h));
             let status: OperationalStatus = 'Proceso';
             if (shift) {
@@ -208,11 +210,10 @@ export default function Dashboard() {
             }
             
             const factor = settings.statusFactors[status] ?? 1.0;
-            calculatedPlan = parseFloat((basePlan * factor).toFixed(2));
+            calculatedPlan = parseFloat((basePlanVal * factor).toFixed(2));
           } else {
-            // "All" lines selected: sum the base plans of all lines
-            settings.lines.forEach(line => {
-              const basePlan = settings.lineConfigs[line]?.basePlan || 4.1;
+            // "All" lines selected: sum the default base plans of all lines
+            settings.lines.forEach(() => {
               const shift = SHIFTS.find(s => s.hours.includes(h));
               let status: OperationalStatus = 'Proceso';
               if (shift) {
@@ -220,7 +221,7 @@ export default function Dashboard() {
                 else if (h === shift.hours[shift.hours.length - 1]) status = 'Fin/cambio';
               }
               const factor = settings.statusFactors[status] ?? 1.0;
-              calculatedPlan += parseFloat((basePlan * factor).toFixed(2));
+              calculatedPlan += parseFloat((basePlanVal * factor).toFixed(2));
             });
           }
           calculatedReal = 0;

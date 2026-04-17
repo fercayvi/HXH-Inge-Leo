@@ -21,7 +21,6 @@ export default function ProductionForm() {
   const [shiftNumber, setShiftNumber] = useState<1 | 2 | 3>(1);
   const [line, setLine] = useState('');
   const [supervisor, setSupervisor] = useState('');
-  const [sku, setSku] = useState(SKUS[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
 
@@ -33,7 +32,7 @@ export default function ProductionForm() {
   }, [settings, line]);
 
   // Hourly data state
-  const [hourlyData, setHourlyData] = useState<Record<string, { id?: string; status: OperationalStatus; real: string; feed: string; injection: string }>>({});
+  const [hourlyData, setHourlyData] = useState<Record<string, { id?: string; status: OperationalStatus; sku: string; real: string; feed: string; injection: string }>>({});
   const [savingHours, setSavingHours] = useState<Record<string, boolean>>({});
 
   const currentShift = SHIFTS.find(s => s.number === shiftNumber)!;
@@ -50,7 +49,7 @@ export default function ProductionForm() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const existingRecords: Record<string, { id?: string; status: OperationalStatus; real: string; feed: string; injection: string }> = {};
+      const existingRecords: Record<string, { id?: string; status: OperationalStatus; sku: string; real: string; feed: string; injection: string }> = {};
       
       // Initialize with default values first
       currentShift.hours.forEach((hour, index) => {
@@ -58,7 +57,7 @@ export default function ProductionForm() {
         if (index === 0) defaultStatus = 'Arranque';
         else if (index === currentShift.hours.length - 1) defaultStatus = 'Fin/cambio';
         
-        existingRecords[hour] = { status: defaultStatus, real: '', feed: '', injection: '' };
+        existingRecords[hour] = { status: defaultStatus, sku: Object.keys(settings.productConfigs)[0] || '', real: '', feed: '', injection: '' };
       });
 
       // Overlay existing data
@@ -67,6 +66,7 @@ export default function ProductionForm() {
         existingRecords[data.hour] = {
           id: doc.id,
           status: data.status,
+          sku: data.sku || Object.keys(settings.productConfigs)[0] || '',
           real: data.real.toString(),
           feed: data.feed?.toString() || '',
           injection: data.injection?.toString() || ''
@@ -94,6 +94,13 @@ export default function ProductionForm() {
     }));
   };
 
+  const handleSkuChange = (hour: string, sku: string) => {
+    setHourlyData(prev => ({
+      ...prev,
+      [hour]: { ...prev[hour], sku }
+    }));
+  };
+
   const saveHour = async (hour: string) => {
     if (!supervisor) {
       toast.error('Selecciona un supervisor antes de guardar');
@@ -106,7 +113,7 @@ export default function ProductionForm() {
       const realNum = parseFloat(data.real) || 0;
       const feedNum = parseFloat(data.feed) || 0;
       const injectionNum = parseFloat(data.injection) || 0;
-      const plan = calculatePlan(data.status);
+      const plan = calculatePlan(data.status, data.sku);
       const compliance = calculateCompliance(realNum, plan);
 
       const recordData = {
@@ -115,7 +122,7 @@ export default function ProductionForm() {
         hour,
         line,
         supervisor,
-        sku,
+        sku: data.sku,
         status: data.status,
         plan,
         real: realNum,
@@ -168,8 +175,9 @@ export default function ProductionForm() {
     }));
   };
 
-  const calculatePlan = (status: OperationalStatus) => {
-    const basePlan = settings.lineConfigs[line]?.basePlan || 4.1;
+  const calculatePlan = (status: OperationalStatus, sku: string) => {
+    const configs = settings.productConfigs || {};
+    const basePlan = configs[sku]?.basePlan || 0;
     const factor = settings.statusFactors[status] ?? 1.0;
     return parseFloat((basePlan * factor).toFixed(2));
   };
@@ -194,7 +202,7 @@ export default function ProductionForm() {
           const realNum = parseFloat(data.real) || 0;
           const feedNum = parseFloat(data.feed) || 0;
           const injectionNum = parseFloat(data.injection) || 0;
-          const plan = calculatePlan(data.status);
+          const plan = calculatePlan(data.status, data.sku);
           const compliance = calculateCompliance(realNum, plan);
 
           return {
@@ -206,7 +214,7 @@ export default function ProductionForm() {
               hour,
               line,
               supervisor,
-              sku,
+              sku: data.sku,
               status: data.status,
               plan,
               real: realNum,
@@ -314,17 +322,6 @@ export default function ProductionForm() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="sku">SKU</Label>
-              <Select value={sku} onValueChange={setSku}>
-                <SelectTrigger id="sku">
-                  <SelectValue placeholder="Seleccionar SKU" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SKUS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           {/* Desktop Table View */}
@@ -334,6 +331,7 @@ export default function ProductionForm() {
                 <TableRow>
                   <TableHead className="w-[140px]">Hora</TableHead>
                   <TableHead className="w-[160px]">Estatus</TableHead>
+                  <TableHead className="w-[160px]">Producto (SKU)</TableHead>
                   <TableHead className="w-[120px]">Aliment. (Ton)</TableHead>
                   <TableHead className="w-[100px]">% Inyec.</TableHead>
                   <TableHead className="w-[120px]">Real (Ton)</TableHead>
@@ -344,9 +342,9 @@ export default function ProductionForm() {
               </TableHeader>
               <TableBody>
                 {currentShift.hours.map((hour) => {
-                  const data = hourlyData[hour] || { status: 'Proceso', real: '', feed: '', injection: '' };
+                  const data = hourlyData[hour] || { status: 'Proceso', sku: '', real: '', feed: '', injection: '' };
                   const realNum = parseFloat(data.real) || 0;
-                  const plan = calculatePlan(data.status);
+                  const plan = calculatePlan(data.status, data.sku);
                   const compliance = calculateCompliance(realNum, plan);
                   const isSaving = savingHours[hour];
 
@@ -365,6 +363,18 @@ export default function ProductionForm() {
                           </SelectTrigger>
                           <SelectContent>
                             {Object.keys(settings.statusFactors).map(s => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
+                          <SelectTrigger className="h-9 border-slate-200">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(settings.productConfigs).map(s => (
                               <SelectItem key={s} value={s}>{s}</SelectItem>
                             ))}
                           </SelectContent>
@@ -430,9 +440,9 @@ export default function ProductionForm() {
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
             {currentShift.hours.map((hour) => {
-              const data = hourlyData[hour] || { status: 'Proceso', real: '', feed: '', injection: '' };
+              const data = hourlyData[hour] || { status: 'Proceso', sku: '', real: '', feed: '', injection: '' };
               const realNum = parseFloat(data.real) || 0;
-              const plan = calculatePlan(data.status);
+              const plan = calculatePlan(data.status, data.sku);
               const compliance = calculateCompliance(realNum, plan);
               const isSaving = savingHours[hour];
 
@@ -463,14 +473,41 @@ export default function ProductionForm() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Producto (SKU)</Label>
+                      <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
+                        <SelectTrigger className="h-10 border-slate-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.keys(settings.productConfigs).map(s => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
                       <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Plan (Ton)</Label>
                       <div className="h-10 flex items-center px-3 bg-slate-50 rounded-md border border-slate-100 text-slate-500 font-mono font-bold">
                         {plan.toFixed(2)}
                       </div>
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Real (Ton)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.1"
+                        className="h-10 border-slate-200 font-bold text-indigo-600"
+                        value={data.real} 
+                        onChange={(e) => handleRealChange(hour, e.target.value)}
+                        placeholder="0.0"
+                      />
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Aliment.</Label>
                       <Input 
@@ -491,17 +528,6 @@ export default function ProductionForm() {
                         value={data.injection} 
                         onChange={(e) => handleInjectionChange(hour, e.target.value)}
                         placeholder="0"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold text-indigo-600">Real (Ton)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        className="h-10 border-indigo-200 focus:border-indigo-500 font-bold text-indigo-600"
-                        value={data.real} 
-                        onChange={(e) => handleRealChange(hour, e.target.value)}
-                        placeholder="0.0"
                       />
                     </div>
                   </div>
