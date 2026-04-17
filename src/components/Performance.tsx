@@ -257,7 +257,7 @@ export default function Performance() {
                   formatter={(value: any, name: string) => [value, name]}
                 />
                 <Legend iconType="circle" />
-                <Bar dataKey="metaSemanal" name="Meta Semanal" fill="#93c5fd" stroke="#60a5fa" strokeWidth={1} radius={[0, 4, 4, 0]} barSize={20} />
+                <Bar dataKey="metaSemanal" name="Meta Semanal" fill="#60a5fa" stroke="#3b82f6" strokeWidth={1} radius={[0, 4, 4, 0]} barSize={20} />
                 <Bar dataKey="capturasReales" name="Capturas Reales" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer>
@@ -285,7 +285,7 @@ export default function Performance() {
                   <span className="text-slate-500 font-medium">Avance</span>
                   <span className="font-bold text-indigo-600">{sup.capturasReales} de {sup.metaSemanal}</span>
                 </div>
-                <div className="h-2.5 w-full bg-blue-100/50 border border-blue-200 rounded-full overflow-hidden">
+                <div className="h-2.5 w-full bg-blue-200/60 border border-blue-300 rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-indigo-600 shadow-sm transition-all duration-500" 
                     style={{ width: `${Math.min(sup.progress, 100)}%` }}

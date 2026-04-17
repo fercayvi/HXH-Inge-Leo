@@ -27,6 +27,8 @@ export interface ShiftConfig {
 export interface Supervisor {
   id?: string;
   name: string;
+  email?: string;
+  role?: 'admin' | 'supervisor';
   weeklyGoal: number;
   active: boolean;
   line: string;

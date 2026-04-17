@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, signIn, logOut } from './lib/firebase';
+import { auth, db, signIn, logOut } from './lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { Supervisor } from './types';
 import ProductionForm from '@/src/components/ProductionForm';
 import Dashboard from '@/src/components/Dashboard';
 import Performance from '@/src/components/Performance';
@@ -24,20 +26,56 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
+const SUPER_ADMINS = ['fecarrillo@ayvi.com.mx'];
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<'admin' | 'supervisor'>('supervisor');
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('supervisor');
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let unsubscribeSupervisors: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setLoading(false);
+      
+      if (currentUser) {
+        // Tarea 1: El Seguro de Vida (Super Admin Hardcoded)
+        if (SUPER_ADMINS.includes(currentUser.email || '')) {
+          setRole('admin');
+          setLoading(false);
+          return;
+        }
+
+        // Tarea 2: Vincular con Firestore
+        const q = query(collection(db, 'supervisors'), where('email', '==', currentUser.email));
+        unsubscribeSupervisors = onSnapshot(q, (snapshot) => {
+          if (!snapshot.empty) {
+            const supervisorData = snapshot.docs[0].data() as Supervisor;
+            setRole(supervisorData.role || 'supervisor');
+          } else {
+            setRole('supervisor');
+          }
+          setLoading(false);
+        }, (error) => {
+          console.error("Error fetching role:", error);
+          setRole('supervisor');
+          setLoading(false);
+        });
+      } else {
+        setRole('supervisor');
+        setLoading(false);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSupervisors) unsubscribeSupervisors();
+    };
   }, []);
 
-  const isAdmin = user?.email === 'fecarrillo@ayvi.com.mx';
+  const isAdmin = role === 'admin';
 
   if (loading) {
     return (
@@ -95,6 +133,9 @@ export default function App() {
             <div className="hidden md:flex flex-col items-end mr-2">
               <span className="text-sm font-semibold text-slate-700">{user.displayName}</span>
               <div className="flex items-center">
+                <Badge variant="outline" className="mr-2 text-[10px] h-4 bg-slate-50 text-slate-500 border-slate-200">
+                  Rol: {role.toUpperCase()}
+                </Badge>
                 {isAdmin ? (
                   <Badge variant="secondary" className="text-[10px] h-4 bg-indigo-50 text-indigo-700 border-indigo-100">
                     <ShieldCheck className="h-3 w-3 mr-1" />
