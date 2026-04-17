@@ -8,6 +8,7 @@ import Dashboard from '@/src/components/Dashboard';
 import Performance from '@/src/components/Performance';
 import SupervisorEditor from '@/src/components/SupervisorEditor';
 import Configuration from '@/src/components/Configuration';
+import DatabaseAudit from '@/src/components/DatabaseAudit';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Toaster } from '@/components/ui/sonner';
@@ -22,7 +23,8 @@ import {
   Settings,
   Users as UsersIcon,
   Sliders,
-  TrendingUp
+  TrendingUp,
+  Database
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -206,6 +208,15 @@ export default function App() {
                   Configuración
                 </TabsTrigger>
               )}
+              {isAdmin && (
+                <TabsTrigger 
+                  value="database" 
+                  className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+                >
+                  <Database className="h-4 w-4 mr-2" />
+                  Base de Datos
+                </TabsTrigger>
+              )}
             </TabsList>
           </div>
 
@@ -232,6 +243,12 @@ export default function App() {
           {isAdmin && (
             <TabsContent value="config" className="mt-0 focus-visible:outline-none">
               <Configuration />
+            </TabsContent>
+          )}
+
+          {isAdmin && (
+            <TabsContent value="database" className="mt-0 focus-visible:outline-none">
+              <DatabaseAudit />
             </TabsContent>
           )}
         </Tabs>
