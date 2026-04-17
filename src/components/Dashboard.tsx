@@ -15,7 +15,8 @@ import {
   TrendingUp, Users, Target, Calendar as CalendarIcon, 
   RefreshCw, BarChart3, Download, Filter, 
   ArrowUpRight, ArrowDownRight, Activity,
-  Trash2, Edit3, Check, X, Eye, Share2
+  Trash2, Edit3, Check, X, Eye, Share2,
+  Maximize2, Minimize2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
@@ -306,6 +307,30 @@ export default function Dashboard() {
 
   const [isSharing, setIsSharing] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // Fullscreen Refs logic
+  const trendCardRef = React.useRef<HTMLDivElement>(null);
+  const shiftCardRef = React.useRef<HTMLDivElement>(null);
+  const lineCardRef = React.useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFs = (ref: React.RefObject<HTMLDivElement>) => {
+    if (!ref.current) return;
+    if (!document.fullscreenElement) {
+      ref.current.requestFullscreen().catch(err => toast.error("Error al entrar a pantalla completa"));
+      if (window.screen.orientation && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        (window.screen.orientation as any).lock('landscape').catch(() => {});
+      }
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   const handleShare = async () => {
     setIsDownloading(true);
@@ -601,20 +626,20 @@ export default function Dashboard() {
       {/* Advanced Filters Bar */}
       <Card className="border-none shadow-md bg-white">
         <CardContent className="p-6">
-          <div className="flex flex-wrap items-end gap-6">
-            <div className="space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-end flex-wrap gap-4 sm:gap-6">
+            <div className="space-y-2 w-full sm:w-auto mb-2 sm:mb-0">
               <Label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Rango de Fechas</Label>
-              <div className="flex items-center gap-2">
-                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40 h-10 rounded-xl" />
-                <span className="text-slate-300">al</span>
-                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40 h-10 rounded-xl" />
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full sm:w-40 h-10 rounded-xl" />
+                <span className="text-slate-300 text-center hidden sm:block font-medium">al</span>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full sm:w-40 h-10 rounded-xl" />
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 w-full sm:w-auto mb-2 sm:mb-0">
               <Label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Línea</Label>
               <Select value={selectedLines[0]} onValueChange={(v) => setSelectedLines([v])}>
-                <SelectTrigger className="w-40 h-10 rounded-xl">
+                <SelectTrigger className="w-full sm:w-40 h-10 rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -624,10 +649,10 @@ export default function Dashboard() {
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 w-full sm:w-auto mb-2 sm:mb-0">
               <Label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Turno</Label>
               <Select value={selectedShift} onValueChange={setSelectedShift}>
-                <SelectTrigger className="w-40 h-10 rounded-xl">
+                <SelectTrigger className="w-full sm:w-40 h-10 rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -639,10 +664,10 @@ export default function Dashboard() {
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 w-full sm:w-auto mb-4 sm:mb-0">
               <Label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Supervisor</Label>
               <Select value={selectedSupervisor} onValueChange={setSelectedSupervisor}>
-                <SelectTrigger className="w-48 h-10 rounded-xl">
+                <SelectTrigger className="w-full sm:w-48 h-10 rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -652,7 +677,7 @@ export default function Dashboard() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
               <Button variant="outline" className="h-10 rounded-xl border-slate-200 text-slate-500" onClick={() => {
                 setDateFrom(new Date().toISOString().split('T')[0]);
                 setDateTo(new Date().toISOString().split('T')[0]);
@@ -733,15 +758,36 @@ export default function Dashboard() {
       </div>
 
       {/* Main Trend Chart */}
-      <Card className="border-none shadow-md bg-white p-6">
-        <CardHeader className="px-0 pt-0 pb-6">
-          <CardTitle className="text-xl font-bold text-slate-800">Tendencia de Producción</CardTitle>
-          <CardDescription>
-            {dateFrom === dateTo ? `Análisis por Horas - ${dateFrom}` : `Análisis por Días - ${dateFrom} al ${dateTo}`}
-          </CardDescription>
+      <Card ref={trendCardRef} className={`border-none shadow-md bg-white p-6 relative ${isFullscreen && document.fullscreenElement === trendCardRef.current ? 'h-screen w-screen flex flex-col justify-center' : ''}`}>
+        {isFullscreen && document.fullscreenElement === trendCardRef.current && (
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={() => document.exitFullscreen()} 
+            className="fixed top-4 right-4 z-[100] rounded-full shadow-2xl"
+          >
+            <X className="h-4 w-4 mr-2" /> Salir enfoque
+          </Button>
+        )}
+        <CardHeader className="px-0 pt-0 pb-6 flex flex-row items-start justify-between">
+          <div className="text-left">
+            <CardTitle className="text-xl font-bold text-slate-800">Tendencia de Producción</CardTitle>
+            <CardDescription>
+              {dateFrom === dateTo ? `Análisis por Horas - ${dateFrom}` : `Análisis por Días - ${dateFrom} al ${dateTo}`}
+            </CardDescription>
+          </div>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => toggleFs(trendCardRef)}
+            className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 -mt-1 rounded-xl"
+            title="Expandir Gráfica"
+          >
+            {isFullscreen && document.fullscreenElement === trendCardRef.current ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+          </Button>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="h-[400px] w-full">
+        <CardContent className="p-0 flex-1">
+          <div className={`${isFullscreen && document.fullscreenElement === trendCardRef.current ? 'h-[80vh]' : 'h-[400px]'} w-full transition-all`}>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -825,12 +871,30 @@ export default function Dashboard() {
       </Card>
       {/* Comparison Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-none shadow-md bg-white p-6">
-          <CardHeader className="px-0 pt-0 pb-6">
-            <CardTitle className="text-lg font-bold text-slate-800">% Cumplimiento por Turno</CardTitle>
+        <Card ref={shiftCardRef} className={`border-none shadow-md bg-white p-6 relative ${isFullscreen && document.fullscreenElement === shiftCardRef.current ? 'h-screen w-screen flex flex-col justify-center' : ''}`}>
+          {isFullscreen && document.fullscreenElement === shiftCardRef.current && (
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              onClick={() => document.exitFullscreen()} 
+              className="fixed top-4 right-4 z-[100] rounded-full shadow-2xl"
+            >
+              <X className="h-4 w-4 mr-2" /> Salir enfoque
+            </Button>
+          )}
+          <CardHeader className="px-0 pt-0 pb-6 flex flex-row items-start justify-between">
+            <CardTitle className="text-lg font-bold text-slate-800 text-left">% Cumplimiento por Turno</CardTitle>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => toggleFs(shiftCardRef)}
+              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 -mt-1 rounded-xl"
+            >
+              <Maximize2 className="h-5 w-5" />
+            </Button>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="h-[300px] w-full">
+          <CardContent className="p-0 flex-1">
+            <div className={`${isFullscreen && document.fullscreenElement === shiftCardRef.current ? 'h-[75vh]' : 'h-[300px]'} w-full`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={shiftComparison}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -848,12 +912,30 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border-none shadow-md bg-white p-6">
-          <CardHeader className="px-0 pt-0 pb-6">
-            <CardTitle className="text-lg font-bold text-slate-800">% Cumplimiento por Línea</CardTitle>
+        <Card ref={lineCardRef} className={`border-none shadow-md bg-white p-6 relative ${isFullscreen && document.fullscreenElement === lineCardRef.current ? 'h-screen w-screen flex flex-col justify-center' : ''}`}>
+          {isFullscreen && document.fullscreenElement === lineCardRef.current && (
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              onClick={() => document.exitFullscreen()} 
+              className="fixed top-4 right-4 z-[100] rounded-full shadow-2xl"
+            >
+              <X className="h-4 w-4 mr-2" /> Salir enfoque
+            </Button>
+          )}
+          <CardHeader className="px-0 pt-0 pb-6 flex flex-row items-start justify-between">
+            <CardTitle className="text-lg font-bold text-slate-800 text-left">% Cumplimiento por Línea</CardTitle>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => toggleFs(lineCardRef)}
+              className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 -mt-1 rounded-xl"
+            >
+              <Maximize2 className="h-5 w-5" />
+            </Button>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="h-[300px] w-full">
+          <CardContent className="p-0 flex-1">
+            <div className={`${isFullscreen && document.fullscreenElement === lineCardRef.current ? 'h-[75vh]' : 'h-[300px]'} w-full`}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={lineComparison} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />

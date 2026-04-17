@@ -18,9 +18,13 @@ import {
   User as UserIcon,
   BarChart3,
   Calendar as CalendarIcon,
-  RefreshCw
+  RefreshCw,
+  Maximize2,
+  Minimize2,
+  X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { 
   Select, 
   SelectContent, 
@@ -45,6 +49,28 @@ export default function Performance() {
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [records, setRecords] = useState<ProductionRecord[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Fullscreen logic
+  const chartCardRef = React.useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFs = () => {
+    if (!chartCardRef.current) return;
+    if (!document.fullscreenElement) {
+      chartCardRef.current.requestFullscreen().catch(() => {});
+      if (window.screen.orientation && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        (window.screen.orientation as any).lock('landscape').catch(() => {});
+      }
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   useEffect(() => {
     // Escuchar cambios en supervisores
@@ -224,17 +250,38 @@ export default function Performance() {
       </div>
 
       {/* Gráfica Comparativa */}
-      <Card className="border-none shadow-2xl shadow-slate-200/50 bg-white overflow-hidden rounded-3xl">
-        <CardHeader className="text-left">
-          <CardTitle className="text-xl font-bold text-slate-900">Comparativa de Capturas</CardTitle>
-          <CardDescription>
-            {periodoSeleccionado === 'semana' && "Meta Semanal vs Capturas Realizadas en la semana actual"}
-            {periodoSeleccionado === 'mes' && "Meta Semanal vs Capturas Realizadas en el mes"}
-            {periodoSeleccionado === 'historico' && "Meta Semanal vs Histórico de Capturas"}
-          </CardDescription>
+      <Card ref={chartCardRef} className={`border-none shadow-2xl shadow-slate-200/50 bg-white overflow-hidden rounded-3xl relative ${isFullscreen ? 'h-screen w-screen flex flex-col justify-center' : ''}`}>
+        {isFullscreen && (
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={() => document.exitFullscreen()} 
+            className="fixed top-4 right-4 z-[100] rounded-full shadow-2xl"
+          >
+            <X className="h-4 w-4 mr-2" /> Salir enfoque
+          </Button>
+        )}
+        <CardHeader className="text-left flex flex-row items-start justify-between">
+          <div>
+            <CardTitle className="text-xl font-bold text-slate-900">Comparativa de Capturas</CardTitle>
+            <CardDescription>
+              {periodoSeleccionado === 'semana' && "Meta Semanal vs Capturas Realizadas en la semana actual"}
+              {periodoSeleccionado === 'mes' && "Meta Semanal vs Capturas Realizadas en el mes"}
+              {periodoSeleccionado === 'historico' && "Meta Semanal vs Histórico de Capturas"}
+            </CardDescription>
+          </div>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={toggleFs}
+            className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 -mt-1 rounded-xl"
+            title="Expandir Gráfica"
+          >
+            {isFullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+          </Button>
         </CardHeader>
-        <CardContent>
-          <div className="h-[400px] w-full mt-4">
+        <CardContent className="flex-1">
+          <div className={`${isFullscreen ? 'h-[80vh]' : 'h-[400px]'} w-full mt-4 transition-all duration-300`}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart 
                 data={performanceData} 
