@@ -163,38 +163,50 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-          <div className="flex items-center justify-between">
-            <TabsList className="bg-slate-200/50 p-1 rounded-xl">
-              <TabsTrigger value="supervisor" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+          <div className="flex items-center justify-between overflow-hidden">
+            <TabsList className="bg-transparent h-auto p-0 flex space-x-2 overflow-x-auto scrollbar-hide pb-2 w-full justify-start">
+              <TabsTrigger 
+                value="supervisor" 
+                className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+              >
                 <ClipboardList className="h-4 w-4 mr-2" />
                 Captura
               </TabsTrigger>
-              <TabsTrigger value="dashboard" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              <TabsTrigger 
+                value="dashboard" 
+                className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+              >
                 <LayoutDashboard className="h-4 w-4 mr-2" />
                 Dashboard
               </TabsTrigger>
-              <TabsTrigger value="performance" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Rendimiento
-              </TabsTrigger>
               {isAdmin && (
-                <TabsTrigger value="supervisors" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <TabsTrigger 
+                  value="performance" 
+                  className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  Rendimiento
+                </TabsTrigger>
+              )}
+              {isAdmin && (
+                <TabsTrigger 
+                  value="supervisors" 
+                  className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+                >
                   <UsersIcon className="h-4 w-4 mr-2" />
                   Supervisores
                 </TabsTrigger>
               )}
               {isAdmin && (
-                <TabsTrigger value="config" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                <TabsTrigger 
+                  value="config" 
+                  className="rounded-full px-6 py-2.5 flex-shrink-0 transition-all duration-200 border border-slate-200 bg-white text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:border-slate-900 data-[state=active]:shadow-lg"
+                >
                   <Sliders className="h-4 w-4 mr-2" />
                   Configuración
                 </TabsTrigger>
               )}
             </TabsList>
-
-            <div className="hidden lg:flex items-center space-x-2 text-slate-400">
-              <Settings className="h-4 w-4" />
-              <span className="text-xs font-medium">Configuración de Planta</span>
-            </div>
           </div>
 
           <TabsContent value="supervisor" className="mt-0 focus-visible:outline-none">
@@ -205,9 +217,11 @@ export default function App() {
             <Dashboard />
           </TabsContent>
 
-          <TabsContent value="performance" className="mt-0 focus-visible:outline-none">
-            <Performance />
-          </TabsContent>
+          {isAdmin && (
+            <TabsContent value="performance" className="mt-0 focus-visible:outline-none">
+              <Performance />
+            </TabsContent>
+          )}
 
           {isAdmin && (
             <TabsContent value="supervisors" className="mt-0 focus-visible:outline-none">
