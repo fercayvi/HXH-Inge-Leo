@@ -185,8 +185,11 @@ export default function Dashboard() {
           calculatedReal = hourRecords.reduce((acc, r) => acc + r.real, 0);
           calculatedPlan = hourRecords.reduce((acc, r) => acc + r.plan, 0);
           calculatedFeed = hourRecords.reduce((acc, r) => acc + (r.feed || 0), 0);
-          // For injection, we take the sum of values as per business rule (no averaging/division)
-          calculatedInjection = hourRecords.reduce((acc, r) => acc + (r.injection || 0), 0);
+          
+          // For injection, calculate dynamic average based on active lines (injection > 0 or real > 0)
+          const activeInjectionRecords = hourRecords.filter(r => (r.injection || 0) > 0 || r.real > 0);
+          const totalInjection = activeInjectionRecords.reduce((acc, r) => acc + (r.injection || 0), 0);
+          calculatedInjection = activeInjectionRecords.length > 0 ? totalInjection / activeInjectionRecords.length : 0;
           
           if (isAllLines) {
             settings.lines.forEach(l => {
@@ -254,7 +257,12 @@ export default function Dashboard() {
           real: dateRecords.reduce((acc, r) => acc + r.real, 0),
           plan: dateRecords.reduce((acc, r) => acc + r.plan, 0),
           feed: dateRecords.reduce((acc, r) => acc + (r.feed || 0), 0),
-          injection: dateRecords.reduce((acc, r) => acc + (r.injection || 0), 0),
+          // For daily view, also use dynamic average for injection
+          injection: (() => {
+            const activeDocs = dateRecords.filter(r => (r.injection || 0) > 0 || r.real > 0);
+            const total = activeDocs.reduce((acc, r) => acc + (r.injection || 0), 0);
+            return activeDocs.length > 0 ? total / activeDocs.length : 0;
+          })(),
           ...lineBreakdown
         };
       });
