@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, query, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { handleFirestoreError, OperationType } from '../lib/error-handler';
 import { useSettings } from '../lib/settings';
 import { Supervisor } from '../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -69,8 +70,7 @@ export default function SupervisorEditor() {
       setNewLine(settings.lines[0]);
       toast.success('Supervisor agregado correctamente');
     } catch (error) {
-      console.error('Error adding supervisor:', error);
-      toast.error('Error al agregar supervisor');
+      handleFirestoreError(error, OperationType.WRITE, 'supervisors');
     } finally {
       setIsAdding(false);
     }
@@ -82,7 +82,7 @@ export default function SupervisorEditor() {
         active: !supervisor.active
       });
     } catch (error) {
-      toast.error('Error al actualizar estado');
+      handleFirestoreError(error, OperationType.UPDATE, `supervisors/${supervisor.id}`);
     }
   };
 
@@ -101,7 +101,7 @@ export default function SupervisorEditor() {
       setEditingId(null);
       toast.success('Supervisor actualizado');
     } catch (error) {
-      toast.error('Error al actualizar');
+      handleFirestoreError(error, OperationType.UPDATE, `supervisors/${editingId}`);
     }
   };
 
@@ -118,7 +118,7 @@ export default function SupervisorEditor() {
       await deleteDoc(doc(db, 'supervisors', id));
       toast.success('Supervisor eliminado');
     } catch (error) {
-      toast.error('Error al eliminar');
+      handleFirestoreError(error, OperationType.DELETE, `supervisors/${id}`);
     }
   };
 

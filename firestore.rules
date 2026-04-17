@@ -56,7 +56,7 @@ service cloud.firestore {
     match /production/{recordId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidProductionRecord(request.resource.data);
-      allow update: if isAdmin() && isValidProductionRecord(request.resource.data);
+      allow update: if isAuthenticated() && isValidProductionRecord(request.resource.data);
       allow delete: if isAdmin();
     }
 

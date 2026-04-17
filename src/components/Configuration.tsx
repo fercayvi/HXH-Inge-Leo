@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useSettings, updateSettings } from '../lib/settings';
+import { handleFirestoreError, OperationType } from '../lib/error-handler';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,8 +43,7 @@ export default function Configuration() {
       await updateSettings(localSettings);
       toast.success('Configuración guardada correctamente');
     } catch (error) {
-      console.error('Error saving settings:', error);
-      toast.error('Error al guardar la configuración');
+      handleFirestoreError(error, OperationType.UPDATE, 'settings');
     } finally {
       setIsSaving(false);
     }
