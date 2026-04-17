@@ -176,11 +176,11 @@ export default function Dashboard() {
       return hoursToShow.map(h => {
         const hourRecords = filteredRecords.filter(r => r.hour === h);
         
-        let calculatedPlan = 0;
-        let calculatedReal = 0;
-        let calculatedFeed = 0;
-        let calculatedInjection = 0;
-        const lineBreakdown: Record<string, number> = {};
+        let calculatedPlan: number | null = null;
+        let calculatedReal: number | null = null;
+        let calculatedFeed: number | null = null;
+        let calculatedInjection: number | null = null;
+        const lineBreakdown: Record<string, number | null> = {};
 
         if (hourRecords.length > 0) {
           calculatedReal = hourRecords.reduce((acc, r) => acc + r.real, 0);
@@ -197,40 +197,6 @@ export default function Dashboard() {
               lineBreakdown[l] = hourRecords.filter(r => r.line === l).reduce((acc, r) => acc + r.real, 0);
             });
           }
-        } else {
-          // If no records exist for this hour, we calculate the expected plan
-          const configs = settings.productConfigs || {};
-          const productKeys = Object.keys(configs);
-          const firstSku = productKeys[0] || '';
-          const basePlanVal = configs[firstSku]?.basePlan || 4.1;
-
-          if (!isAllLines) {
-            // Specific line selected
-            const shift = SHIFTS.find(s => s.hours.includes(h));
-            let status: OperationalStatus = 'Proceso';
-            if (shift) {
-              if (h === shift.hours[0]) status = 'Arranque';
-              else if (h === shift.hours[shift.hours.length - 1]) status = 'Fin/cambio';
-            }
-            
-            const factor = settings.statusFactors[status] ?? 1.0;
-            calculatedPlan = parseFloat((basePlanVal * factor).toFixed(2));
-          } else {
-            // "All" lines selected: sum the default base plans of all lines
-            settings.lines.forEach(() => {
-              const shift = SHIFTS.find(s => s.hours.includes(h));
-              let status: OperationalStatus = 'Proceso';
-              if (shift) {
-                if (h === shift.hours[0]) status = 'Arranque';
-                else if (h === shift.hours[shift.hours.length - 1]) status = 'Fin/cambio';
-              }
-              const factor = settings.statusFactors[status] ?? 1.0;
-              calculatedPlan += parseFloat((basePlanVal * factor).toFixed(2));
-            });
-          }
-          calculatedReal = 0;
-          calculatedFeed = 0;
-          calculatedInjection = 0;
         }
 
         return {

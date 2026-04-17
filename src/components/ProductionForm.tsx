@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, doc, setDoc, updateDoc, getDocs, limit, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/error-handler';
 import { useSettings } from '../lib/settings';
@@ -13,33 +13,77 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Loader2, Save, CheckCircle2, History, Clock } from 'lucide-react';
+import { Loader2, Save, CheckCircle2, History, Clock, Lock, ClipboardList } from 'lucide-react';
 
 export default function ProductionForm() {
   const { settings, loading: settingsLoading } = useSettings();
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [shiftNumber, setShiftNumber] = useState<1 | 2 | 3>(1);
+  const [shiftNumber, setShiftNumber] = useState<number>(0);
   const [line, setLine] = useState('');
   const [supervisor, setSupervisor] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
 
-  // Sync line with settings when loaded
+  // Task 1: No automatic line selection. 
+  // We removed the useEffect that auto-synced line with settings[0].
+
+  // Reset context when shift or line changes to ensure intentional selection
   useEffect(() => {
-    if (settings && settings.lines.length > 0 && !line) {
-      setLine(settings.lines[0]);
-    }
-  }, [settings, line]);
+    // When shift changes, reset line as well
+    setLine('');
+  }, [shiftNumber]);
+
+  useEffect(() => {
+    // When shift, line or date changes, reset supervisor to ensure strict daily isolation
+    setSupervisor('');
+  }, [date, shiftNumber, line]);
+
+  // Task 2: Intelligent Supervisor Auto-complete
+  useEffect(() => {
+    const autoFillSupervisor = async () => {
+      // SHARP VALIDATION: Must have Date, Shift and Line
+      if (!date || !shiftNumber || shiftNumber === 0 || !line || line === '') {
+        return;
+      }
+
+      // EXCLUSIVELY Query Firestore for a record in THIS DATE, Shift and Line (production collection)
+      try {
+        const q = query(
+          collection(db, 'production'),
+          where('date', '==', date),
+          where('shift', '==', shiftNumber),
+          where('line', '==', line),
+          limit(1)
+        );
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const lastRecord = snapshot.docs[0].data() as ProductionRecord;
+          if (lastRecord.supervisor) {
+            setSupervisor(lastRecord.supervisor);
+          }
+        }
+      } catch (err) {
+        console.warn("Autofill supervisor failed:", err);
+      }
+    };
+
+    autoFillSupervisor();
+  }, [date, shiftNumber, line]);
 
   // Hourly data state
   const [hourlyData, setHourlyData] = useState<Record<string, { id?: string; status: OperationalStatus; sku: string; real: string; feed: string; injection: string }>>({});
   const [savingHours, setSavingHours] = useState<Record<string, boolean>>({});
 
-  const currentShift = SHIFTS.find(s => s.number === shiftNumber)!;
+  const currentShift = SHIFTS.find(s => s.number === shiftNumber);
+  const isReadyToCapture = shiftNumber > 0 && line !== '' && supervisor !== '';
 
   // Load existing records for the selected context
   useEffect(() => {
-    if (!line || !date) return;
+    if (!line || !date || !shiftNumber || !currentShift) {
+      // Clear data if filters are not fully selected
+      setHourlyData({});
+      return;
+    }
 
     const q = query(
       collection(db, 'production'),
@@ -57,7 +101,7 @@ export default function ProductionForm() {
         if (index === 0) defaultStatus = 'Arranque';
         else if (index === currentShift.hours.length - 1) defaultStatus = 'Fin/cambio';
         
-        existingRecords[hour] = { status: defaultStatus, sku: Object.keys(settings.productConfigs)[0] || '', real: '', feed: '', injection: '' };
+        existingRecords[hour] = { status: defaultStatus, sku: '', real: '', feed: '', injection: '' };
       });
 
       // Overlay existing data
@@ -66,7 +110,7 @@ export default function ProductionForm() {
         existingRecords[data.hour] = {
           id: doc.id,
           status: data.status,
-          sku: data.sku || Object.keys(settings.productConfigs)[0] || '',
+          sku: data.sku || '',
           real: data.real.toString(),
           feed: data.feed?.toString() || '',
           injection: data.injection?.toString() || ''
@@ -80,11 +124,8 @@ export default function ProductionForm() {
   }, [date, shiftNumber, line]);
 
   const handleSupervisorChange = (name: string) => {
+    if (!name) return; // Prevent setting to empty if coming from a selection
     setSupervisor(name);
-    const sup = supervisors.find(s => s.name === name);
-    if (sup && sup.line) {
-      setLine(sup.line);
-    }
   };
 
   const handleStatusChange = (hour: string, status: OperationalStatus) => {
@@ -102,14 +143,30 @@ export default function ProductionForm() {
   };
 
   const saveHour = async (hour: string) => {
-    if (!supervisor) {
-      toast.error('Selecciona un supervisor antes de guardar');
+    if (!shiftNumber || !line || !supervisor) {
+      toast.error('Por favor selecciona Turno, Línea y Supervisor antes de guardar.');
       return;
     }
 
     setSavingHours(prev => ({ ...prev, [hour]: true }));
     try {
       const data = hourlyData[hour];
+      
+      if (!data.sku || data.sku === '') {
+        toast.error('Debes seleccionar un producto (SKU) para guardar');
+        setSavingHours(prev => ({ ...prev, [hour]: false }));
+        return;
+      }
+
+      const isRealEmpty = data.real === '';
+      const isFeedEmpty = data.feed === '';
+
+      if (isRealEmpty && isFeedEmpty) {
+        toast.error('Captura al menos Alimentación o Real para guardar');
+        setSavingHours(prev => ({ ...prev, [hour]: false }));
+        return;
+      }
+
       const realNum = parseFloat(data.real) || 0;
       const feedNum = parseFloat(data.feed) || 0;
       const injectionNum = parseFloat(data.injection) || 0;
@@ -176,6 +233,7 @@ export default function ProductionForm() {
   };
 
   const calculatePlan = (status: OperationalStatus, sku: string) => {
+    if (!sku || sku === '') return 0;
     const configs = settings.productConfigs || {};
     const basePlan = configs[sku]?.basePlan || 0;
     const factor = settings.statusFactors[status] ?? 1.0;
@@ -194,9 +252,26 @@ export default function ProductionForm() {
   };
 
   const handleSubmit = async () => {
+    if (!shiftNumber || !line || !supervisor || !currentShift) {
+      toast.error('Por favor selecciona Turno, Línea y Supervisor antes de guardar.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const recordsToSave = currentShift.hours
+      const hoursWithInput = currentShift.hours.filter(h => {
+        const d = hourlyData[h];
+        return d && (d.real !== '' || d.feed !== '');
+      });
+
+      const invalidSkuHours = hoursWithInput.filter(h => !hourlyData[h].sku || hourlyData[h].sku === '');
+      if (invalidSkuHours.length > 0) {
+        toast.error(`Error: Tienes filas con datos numéricos pero sin un Producto (SKU) seleccionado en: ${invalidSkuHours.join(', ')}`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const recordsToSave = hoursWithInput
         .map(hour => {
           const data = hourlyData[hour];
           const realNum = parseFloat(data.real) || 0;
@@ -224,8 +299,7 @@ export default function ProductionForm() {
               timestamp: serverTimestamp()
             }
           };
-        })
-        .filter(record => record.data.real > 0 || record.data.status !== 'Proceso');
+        });
 
       if (recordsToSave.length === 0) {
         toast.error('No hay datos para guardar.');
@@ -259,7 +333,6 @@ export default function ProductionForm() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Supervisor[];
       setSupervisors(data);
-      if (data.length > 0 && !supervisor) setSupervisor(data[0].name);
     });
     return () => unsubscribe();
   }, []);
@@ -287,11 +360,12 @@ export default function ProductionForm() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="shift">Turno</Label>
-              <Select value={shiftNumber.toString()} onValueChange={(v) => setShiftNumber(parseInt(v) as 1 | 2 | 3)}>
+              <Select value={shiftNumber?.toString() || ""} onValueChange={(v) => setShiftNumber(parseInt(v))}>
                 <SelectTrigger id="shift">
                   <SelectValue placeholder="Seleccionar turno" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="" disabled>Seleccionar Turno...</SelectItem>
                   <SelectItem value="1">Turno 1 (06:30 - 14:30)</SelectItem>
                   <SelectItem value="2">Turno 2 (14:30 - 22:30)</SelectItem>
                   <SelectItem value="3">Turno 3 (22:30 - 06:30)</SelectItem>
@@ -305,6 +379,7 @@ export default function ProductionForm() {
                   <SelectValue placeholder="Seleccionar línea" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="" disabled>Seleccionar Línea...</SelectItem>
                   {settings.lines.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -316,6 +391,7 @@ export default function ProductionForm() {
                   <SelectValue placeholder="Seleccionar supervisor" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="" disabled>Seleccionar Supervisor...</SelectItem>
                   {supervisors.map(s => (
                     <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
                   ))}
@@ -324,23 +400,124 @@ export default function ProductionForm() {
             </div>
           </div>
 
-          {/* Desktop Table View */}
-          <div className="hidden md:block rounded-xl border border-slate-200 overflow-hidden bg-white">
-            <Table>
-              <TableHeader className="bg-slate-50">
-                <TableRow>
-                  <TableHead className="w-[140px]">Hora</TableHead>
-                  <TableHead className="w-[160px]">Estatus</TableHead>
-                  <TableHead className="w-[160px]">Producto (SKU)</TableHead>
-                  <TableHead className="w-[120px]">Aliment. (Ton)</TableHead>
-                  <TableHead className="w-[100px]">% Inyec.</TableHead>
-                  <TableHead className="w-[120px]">Real (Ton)</TableHead>
-                  <TableHead className="w-[100px]">Plan (Ton)</TableHead>
-                  <TableHead className="text-right w-[120px]">% Cumpl.</TableHead>
-                  <th className="w-[50px]"></th>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          {isReadyToCapture && currentShift ? (
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden md:block rounded-xl border border-slate-200 overflow-hidden bg-white">
+                <Table>
+                  <TableHeader className="bg-slate-50">
+                    <TableRow>
+                      <TableHead className="w-[140px]">Hora</TableHead>
+                      <TableHead className="w-[160px]">Estatus</TableHead>
+                      <TableHead className="w-[160px]">Producto (SKU)</TableHead>
+                      <TableHead className="w-[120px]">Aliment. (Ton)</TableHead>
+                      <TableHead className="w-[100px]">% Inyec.</TableHead>
+                      <TableHead className="w-[120px]">Real (Ton)</TableHead>
+                      <TableHead className="w-[100px]">Plan (Ton)</TableHead>
+                      <TableHead className="text-right w-[120px]">% Cumpl.</TableHead>
+                      <th className="w-[50px]"></th>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentShift.hours.map((hour) => {
+                      const data = hourlyData[hour] || { status: 'Proceso', sku: '', real: '', feed: '', injection: '' };
+                      const realNum = parseFloat(data.real) || 0;
+                      const plan = calculatePlan(data.status, data.sku);
+                      const compliance = calculateCompliance(realNum, plan);
+                      const isSaving = savingHours[hour];
+
+                      return (
+                        <TableRow key={hour} className="hover:bg-slate-50/50 transition-colors">
+                          <TableCell className="font-medium text-slate-700">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3 w-3 text-slate-400" />
+                              {hour}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Select value={data.status} onValueChange={(v) => handleStatusChange(hour, v as OperationalStatus)}>
+                              <SelectTrigger className="h-9 border-slate-200">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.keys(settings.statusFactors).map(s => (
+                                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
+                              <SelectTrigger className={`h-9 border-slate-200 transition-all ${!data.sku ? 'border-red-300 bg-red-50/30' : ''}`}>
+                                <SelectValue placeholder="Seleccionar..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="">Seleccionar producto...</SelectItem>
+                                {Object.keys(settings.productConfigs).map(s => (
+                                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              step="0.1"
+                              className="h-9 border-slate-200"
+                              value={data.feed} 
+                              onChange={(e) => handleFeedChange(hour, e.target.value)}
+                              placeholder="0.0"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              step="0.1"
+                              className="h-9 border-slate-200"
+                              value={data.injection} 
+                              onChange={(e) => handleInjectionChange(hour, e.target.value)}
+                              placeholder="0"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input 
+                              type="number" 
+                              step="0.1"
+                              min="0"
+                              max={settings.maxProduction}
+                              className="h-9 border-slate-200 font-bold text-indigo-600"
+                              value={data.real} 
+                              onChange={(e) => handleRealChange(hour, e.target.value)}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0.0"
+                            />
+                          </TableCell>
+                          <TableCell className="text-slate-500 font-mono text-xs">{plan.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-semibold`}>
+                              {compliance}%
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className={`h-8 w-8 ${data.id ? 'text-green-500' : 'text-slate-300'}`}
+                              onClick={() => saveHour(hour)}
+                              disabled={isSaving}
+                            >
+                              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-4">
                 {currentShift.hours.map((hour) => {
                   const data = hourlyData[hour] || { status: 'Proceso', sku: '', real: '', feed: '', injection: '' };
                   const realNum = parseFloat(data.real) || 0;
@@ -349,227 +526,142 @@ export default function ProductionForm() {
                   const isSaving = savingHours[hour];
 
                   return (
-                    <TableRow key={hour} className="hover:bg-slate-50/50 transition-colors">
-                      <TableCell className="font-medium text-slate-700">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-3 w-3 text-slate-400" />
+                    <div key={hour} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+                        <div className="flex items-center gap-2 font-bold text-slate-700">
+                          <Clock className="h-4 w-4 text-indigo-500" />
                           {hour}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Select value={data.status} onValueChange={(v) => handleStatusChange(hour, v as OperationalStatus)}>
-                          <SelectTrigger className="h-9 border-slate-200">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.keys(settings.statusFactors).map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
-                          <SelectTrigger className="h-9 border-slate-200">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.keys(settings.productConfigs).map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Input 
-                          type="number" 
-                          step="0.1"
-                          className="h-9 border-slate-200"
-                          value={data.feed} 
-                          onChange={(e) => handleFeedChange(hour, e.target.value)}
-                          placeholder="0.0"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input 
-                          type="number" 
-                          step="0.1"
-                          className="h-9 border-slate-200"
-                          value={data.injection} 
-                          onChange={(e) => handleInjectionChange(hour, e.target.value)}
-                          placeholder="0"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input 
-                          type="number" 
-                          step="0.1"
-                          min="0"
-                          max={settings.maxProduction}
-                          className="h-9 border-slate-200 font-bold text-indigo-600"
-                          value={data.real} 
-                          onChange={(e) => handleRealChange(hour, e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          placeholder="0.0"
-                        />
-                      </TableCell>
-                      <TableCell className="text-slate-500 font-mono text-xs">{plan.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-semibold`}>
+                        <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-bold`}>
                           {compliance}%
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className={`h-8 w-8 ${data.id ? 'text-green-500' : 'text-slate-300'}`}
-                          onClick={() => saveHour(hour)}
-                          disabled={isSaving}
-                        >
-                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Estatus</Label>
+                          <Select value={data.status} onValueChange={(v) => handleStatusChange(hour, v as OperationalStatus)}>
+                            <SelectTrigger className="h-10 border-slate-200">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.keys(settings.statusFactors).map(s => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Producto (SKU)</Label>
+                          <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
+                            <SelectTrigger className={`h-10 border-slate-200 ${!data.sku ? 'border-red-300 bg-red-50/30' : ''}`}>
+                              <SelectValue placeholder="Seleccionar..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">Seleccionar producto...</SelectItem>
+                              {Object.keys(settings.productConfigs).map(s => (
+                                <SelectItem key={s} value={s}>{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Plan (Ton)</Label>
+                          <div className="h-10 flex items-center px-3 bg-slate-50 rounded-md border border-slate-100 text-slate-500 font-mono font-bold">
+                            {plan.toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Real (Ton)</Label>
+                          <Input 
+                            type="number" 
+                            step="0.1"
+                            className="h-10 border-slate-200 font-bold text-indigo-600"
+                            value={data.real} 
+                            onChange={(e) => handleRealChange(hour, e.target.value)}
+                            placeholder="0.0"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Aliment.</Label>
+                          <Input 
+                            type="number" 
+                            step="0.1"
+                            className="h-10 border-slate-200"
+                            value={data.feed} 
+                            onChange={(e) => handleFeedChange(hour, e.target.value)}
+                            placeholder="0.0"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">% Inyec.</Label>
+                          <Input 
+                            type="number" 
+                            step="0.1"
+                            className="h-10 border-slate-200"
+                            value={data.injection} 
+                            onChange={(e) => handleInjectionChange(hour, e.target.value)}
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+
+                      <Button 
+                        className={`w-full h-11 ${data.id ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                        variant={data.id ? 'secondary' : 'default'}
+                        onClick={() => saveHour(hour)}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        {data.id ? 'Actualizar Hora' : 'Guardar Hora'}
+                      </Button>
+                    </div>
                   );
                 })}
-              </TableBody>
-            </Table>
-          </div>
+              </div>
 
-          {/* Mobile Card View */}
-          <div className="md:hidden space-y-4">
-            {currentShift.hours.map((hour) => {
-              const data = hourlyData[hour] || { status: 'Proceso', sku: '', real: '', feed: '', injection: '' };
-              const realNum = parseFloat(data.real) || 0;
-              const plan = calculatePlan(data.status, data.sku);
-              const compliance = calculateCompliance(realNum, plan);
-              const isSaving = savingHours[hour];
-
-              return (
-                <div key={hour} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-50 pb-3">
-                    <div className="flex items-center gap-2 font-bold text-slate-700">
-                      <Clock className="h-4 w-4 text-indigo-500" />
-                      {hour}
-                    </div>
-                    <Badge variant="outline" className={`${getComplianceColor(compliance)} border font-bold`}>
-                      {compliance}%
-                    </Badge>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Estatus</Label>
-                      <Select value={data.status} onValueChange={(v) => handleStatusChange(hour, v as OperationalStatus)}>
-                        <SelectTrigger className="h-10 border-slate-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.keys(settings.statusFactors).map(s => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Producto (SKU)</Label>
-                      <Select value={data.sku} onValueChange={(v) => handleSkuChange(hour, v)}>
-                        <SelectTrigger className="h-10 border-slate-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.keys(settings.productConfigs).map(s => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Plan (Ton)</Label>
-                      <div className="h-10 flex items-center px-3 bg-slate-50 rounded-md border border-slate-100 text-slate-500 font-mono font-bold">
-                        {plan.toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Real (Ton)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        className="h-10 border-slate-200 font-bold text-indigo-600"
-                        value={data.real} 
-                        onChange={(e) => handleRealChange(hour, e.target.value)}
-                        placeholder="0.0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Aliment.</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        className="h-10 border-slate-200"
-                        value={data.feed} 
-                        onChange={(e) => handleFeedChange(hour, e.target.value)}
-                        placeholder="0.0"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">% Inyec.</Label>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        className="h-10 border-slate-200"
-                        value={data.injection} 
-                        onChange={(e) => handleInjectionChange(hour, e.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-
-                  <Button 
-                    className={`w-full h-11 ${data.id ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-                    variant={data.id ? 'secondary' : 'default'}
-                    onClick={() => saveHour(hour)}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Save className="h-4 w-4 mr-2" />
-                    )}
-                    {data.id ? 'Actualizar Hora' : 'Guardar Hora'}
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex justify-end pt-4">
-            <Button 
-              size="lg" 
-              onClick={handleSubmit} 
-              disabled={isSubmitting}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 px-8"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Guardando...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-5 w-5" />
-                  Guardar Turno
-                </>
-              )}
-            </Button>
-          </div>
+              <div className="flex justify-end pt-4">
+                <Button 
+                  size="lg" 
+                  onClick={handleSubmit} 
+                  disabled={isSubmitting}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 px-8"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-5 w-5" />
+                      Guardar Turno
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 px-4 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-100 animate-in fade-in zoom-in duration-500">
+              <div className="p-4 bg-white rounded-full shadow-sm mb-6">
+                <Lock className="h-12 w-12 text-slate-200" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-700 mb-2">Tabla de captura bloqueada</h3>
+              <p className="text-slate-400 text-center max-w-sm">
+                Por favor selecciona el Turno, la Línea y el Supervisor en la parte superior para habilitar el registro de horas.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
