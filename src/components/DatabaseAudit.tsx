@@ -1,5 +1,6 @@
+"use client";
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { ProductionRecord, Supervisor } from '../types';
 import { useSettings } from '../lib/settings';
@@ -57,6 +58,7 @@ export default function DatabaseAudit() {
   const [records, setRecords] = useState<ProductionRecord[]>([]);
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   
   // States for Advanced Filters
   const [periodo, setPeriodo] = useState<string>('todo');
@@ -66,9 +68,15 @@ export default function DatabaseAudit() {
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('all');
   const [selectedShift, setSelectedShift] = useState<string>('all');
   
-  const isAdmin = auth.currentUser?.email === 'fecarrillo@ayvi.com.mx';
-
   useEffect(() => {
+    // Robust Admin Check
+    const unsubAuth = auth.onAuthStateChanged(user => {
+      console.log("Auth state changed. User:", user?.email);
+      const adminStatus = user?.email === 'fecarrillo@ayvi.com.mx';
+      console.log("Is Admin:", adminStatus);
+      setIsAdmin(adminStatus);
+    });
+
     // Escuchar cambios en registros de producción
     const q = query(collection(db, 'production'), orderBy('date', 'desc'), orderBy('hour', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -90,6 +98,7 @@ export default function DatabaseAudit() {
     return () => {
       unsubscribe();
       unsubSup();
+      unsubAuth();
     };
   }, []);
 
@@ -189,6 +198,37 @@ export default function DatabaseAudit() {
     if (compliance >= 95) return 'bg-emerald-500';
     if (compliance >= 80) return 'bg-amber-500';
     return 'bg-red-500';
+  };
+
+  const handleDelete = async (recordIds: string[]) => {
+    console.log("Iniciando handleDelete para IDs:", recordIds);
+    // Confirmación estricta
+    if (!window.confirm("¿Estás seguro de eliminar este registro? Esta acción borrará todas las horas de este turno y no se puede deshacer.")) {
+      console.log("Borrado cancelado por el usuario");
+      return;
+    }
+
+    try {
+      console.log("Ejecutando deleteDoc para cada ID...");
+      // Borrado en Firebase (siguiendo instrucción de deleteDoc)
+      for (const id of recordIds) {
+        console.log("Borrando documento:", id);
+        await deleteDoc(doc(db, 'production', id));
+      }
+      
+      // Actualización de la UI local (feedback instantáneo)
+      setRecords(prev => prev.filter(record => !recordIds.includes(record.id)));
+      
+      toast.success('Registro eliminado con éxito');
+      console.log("Borrado completado con éxito");
+    } catch (error) {
+      console.error("Error al eliminar los registros:", error);
+      toast.error('Error al intentar eliminar el registro');
+    }
+  };
+
+  const handleActionConstruct = (action: string) => {
+    toast.info(`Función de ${action} en construcción`);
   };
 
   if (loading) {
@@ -412,7 +452,7 @@ export default function DatabaseAudit() {
                   </TableRow>
                 ) : (
                   groupedRecords.map((g) => (
-                    <TableRow key={g.id} className="border-slate-50 hover:bg-indigo-50/20 transition-colors group">
+                    <TableRow key={g.id} className="border-slate-50 hover:bg-slate-50 transition-colors group">
                       <TableCell className="px-6 py-4 font-bold text-slate-700 whitespace-nowrap">
                         {format(parseISO(g.date), 'dd/MM/yy')}
                       </TableCell>
@@ -432,23 +472,44 @@ export default function DatabaseAudit() {
                         </div>
                       </TableCell>
                       <TableCell className="px-6 py-4 text-right">
-                        <div className="flex justify-end items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl">
-                            <Eye className="h-4.5 w-4.5" />
-                          </Button>
-                          {isAdmin && (
-                            <>
-                              <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl">
-                                <Edit3 className="h-4.5 w-4.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl">
-                                <Trash2 className="h-4.5 w-4.5" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                        <div className="group-hover:hidden text-slate-300 opacity-20">
-                          <MoreHorizontal className="h-5 w-5 ml-auto mr-2" />
+                        <div className="relative min-w-[120px] flex justify-end">
+                          <div className="flex justify-end items-center space-x-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleActionConstruct('Ver')}
+                              className="h-9 w-9 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"
+                            >
+                              <Eye className="h-4.5 w-4.5" />
+                            </Button>
+                            {isAdmin && (
+                              <>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={() => handleActionConstruct('Editar')}
+                                  className="h-9 w-9 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"
+                                >
+                                  <Edit3 className="h-4.5 w-4.5" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    console.log("Botón eliminar clickeado. IDs del grupo:", g.recordIds);
+                                    handleDelete(g.recordIds);
+                                  }}
+                                  className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl"
+                                >
+                                  <Trash2 className="h-4.5 w-4.5" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                          <div className="absolute right-0 top-1/2 -translate-y-1/2 group-hover:opacity-0 text-slate-300 opacity-40 transition-opacity">
+                            <MoreHorizontal className="h-5 w-5 mr-2" />
+                          </div>
                         </div>
                       </TableCell>
                     </TableRow>
